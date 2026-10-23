@@ -10,6 +10,7 @@
     --acc:#4fb3ff; --ok:#37c988; --bad:#ff6666; --warn:#ffb454;
     --c-picker:#4fb3ff; --c-checker:#f2c94c; --c-stacker:#c792ea;
     --c-forklift:#ff8b5e; --c-loader:#5ad1c8; --c-truck:#ffdd57;
+    --c-operator:#ff6b81;
   }
   *{box-sizing:border-box} html,body{margin:0;height:100%}
   body{background:var(--bg);color:var(--txt);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
@@ -58,6 +59,25 @@
   .empty{color:var(--mut);font-size:12px;padding:6px 0}
   .toggle{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
   .toggle label{display:flex;gap:4px;align-items:center}
+
+  /* staff mini-timeline */
+  .staff-timeline{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+  .stl-row{display:grid;grid-template-columns:72px 1fr;gap:8px;align-items:center;font-size:11px}
+  .stl-name{color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stl-name.onbreak{color:var(--warn)}
+  .stl-track{position:relative;height:18px;background:#11161d;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .stl-track::before{content:"";position:absolute;inset:0;background:
+    repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 4px,transparent 4px 8px)}
+  .stl-bar{position:absolute;top:0;bottom:0;border-radius:2px;opacity:.9}
+  .stl-bar.duty{background:var(--line);opacity:.35}
+  .stl-bar.busy{background:var(--acc)}
+  .stl-bar.break{background:#2a1a1a;background-image:repeating-linear-gradient(135deg,rgba(255,80,80,.25) 0 3px,transparent 3px 6px);border:1px solid #4a2a2a}
+  .stl-bar.veh{background:#ffdd57;opacity:.85}
+  .stl-tooltip{position:absolute;background:#000d;border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:10px;color:var(--txt);white-space:nowrap;pointer-events:none;z-index:2;transform:translateX(-50%);bottom:100%;margin-bottom:4px;display:none}
+  .stl-bar:hover .stl-tooltip{display:block}
+  .stl-legend{display:flex;gap:12px;font-size:10px;color:var(--mut);margin-top:4px;flex-wrap:wrap}
+  .stl-legend span{display:flex;align-items:center;gap:4px}
+  .stl-legend i{width:10px;height:6px;border-radius:2px;display:inline-block}
 </style>
 </head>
 <body>
@@ -97,6 +117,7 @@
     <div class="card">
       <h2>Pegawai &amp; peralatan</h2>
       <div class="staffgrid" id="staff"></div>
+      <div class="staff-timeline" id="stafftl"></div>
       <div style="display:grid;grid-template-columns:1fr 64px 1fr 64px;gap:4px 10px;margin-top:8px;align-items:center">
         <span style="color:var(--mut)">Truk</span>
         <div class="stepper"><button data-step="trucks" data-d="-1" data-lo="1" data-hi="20">–</button><b id="n_trucks">12</b><button data-step="trucks" data-d="1" data-lo="1" data-hi="20">+</button></div>
@@ -174,13 +195,13 @@ window.addEventListener("unhandledrejection",e=>showErr((e.reason&&e.reason.mess
  * z = block axis (CA..CF), y = height. Gates sit on the short west wall.
  * Time is simulated seconds. 1x speed = 60 sim-seconds per wall second. */
 
-const ROLE_COLOR={picker:"--c-picker",checker:"--c-checker",
-  forklift:"--c-forklift",stacker:"--c-stacker",loader:"--c-loader",truck:"--c-truck"};
-const ROLE_LABEL={picker:"Picker",checker:"Checker",forklift:"Forklift",
-  stacker:"Stacker (reach)",loader:"Pemuat",truck:"Truk"};
-const ROLE_STAFF=[["pickers","Picker"],["checkers","Checker"],
-  ["stackers","Stacker (reach)"],["forklifts","Forklift"],["loaders","Pemuat"]];
-const QKEYS=[["q_forklift","Forklift","#ff8b5e"],["q_stacker","Stacker","#c792ea"],
+const ROLE_COLOR={picker:"--c-picker",checker:"--c-checker",operator:"--c-operator",
+  forklift:"--c-forklift",stacker:"--c-stacker",reach:"--c-stacker",loader:"--c-loader",truck:"--c-truck"};
+const ROLE_LABEL={picker:"Picker",checker:"Checker",operator:"Operator",forklift:"Forklift",
+  stacker:"Stacker (reach)",reach:"Reach truck",loader:"Pemuat",truck:"Truk"};
+const ROLE_STAFF=[["pickers","Picker"],["checkers","Checker"],["operators","Operator"],
+  ["stackers","Reach truck"],["forklifts","Forklift"],["loaders","Pemuat"]];
+const QKEYS=[["q_operator","Operator","#ff6b81"],["q_forklift","Forklift","#ff8b5e"],["q_stacker","Stacker","#c792ea"],
   ["q_loader","Pemuat","#5ad1c8"],["q_picker","Picker","#4fb3ff"],
   ["q_checker","Checker","#f2c94c"]];
 /* grey empty → amber half → teal full */
@@ -471,7 +492,19 @@ function draw(){
   document.getElementById("clock").textContent=fmt(T0+NOW);
   document.getElementById("scrub").value=END?NOW/END:0;
   updateFeed();
+  updateBreakStatus();
   drawTip(showRack);
+}
+function updateBreakStatus(){
+  const brkMap=window.__breakMap||{};
+  if(!Object.keys(brkMap).length)return;
+  document.querySelectorAll(".stl-row").forEach(row=>{
+    const name=row.dataset.agent;
+    const breaks=brkMap[name]||[];
+    const onBreak=breaks.some(([s,e])=>NOW>=s&&NOW<=e);
+    const nameEl=row.querySelector(".stl-name");
+    if(nameEl)nameEl.classList.toggle("onbreak",onBreak);
+  });
 }
 
 /* ---------- tooltip + pan/zoom ---------- */
@@ -515,6 +548,10 @@ function drawTip(showRack){
   }
   const[name,a]=best,label=activeLabel(a,NOW);
   let extra="";
+  // on break indicator
+  const brkMap=window.__breakMap||{};
+  const onBreak=(brkMap[name]||[]).some(([s,e])=>NOW>=s&&NOW<=e);
+  if(onBreak)extra+=`<br><span style="color:var(--warn)">(istirahat)</span>`;
   if(a.role==="truck"&&LOG.trucks[name.replace(/^T/,"")]){
     const t=LOG.trucks[name.replace(/^T/,"")];
     let late=`<br>rencana ${fmt(T0+t.sched)} · tiba <b style="color:${lateColor(t)}">${fmt(T0+t.arrival)}</b>`;
@@ -604,6 +641,58 @@ function fillStaff(){
     <button data-step="${k}" data-d="1" data-lo="0" data-hi="12">+</button></div>`).join("");
   document.getElementById("n_trucks").textContent=f.n_trucks??12;
   document.getElementById("n_seed").value=String(f.seed??7);
+  renderStaffTimeline();
+}
+function renderStaffTimeline(){
+  const tl=document.getElementById("stafftl");
+  if(!tl||!LOG||!LOG.agents){tl.innerHTML="";return;}
+  const breaks=LOG.breaks||[];                     // [agent, role, start, end] in sim seconds
+  const vsegs=LOG.vehicle_segs||{};                // {F1: [[start, end, agent, desc], ...]}
+  const end=END;                                   // simulation duration in seconds
+  if(!end){tl.innerHTML="";return;}
+  // map agent name -> list of break intervals
+  const brkByAgent={};
+  for(const b of breaks){if(!brkByAgent[b[0]])brkByAgent[b[0]]=[];brkByAgent[b[0]].push([b[2],b[3]]);}
+  // map agent name -> list of vehicle segments (for forklifts/loaders on trucks)
+  const vehByAgent={};
+  for(const [vid,segs] of Object.entries(vsegs)){
+    for(const s of segs){const an=s[2];if(an){if(!vehByAgent[an])vehByAgent[an]=[];vehByAgent[an].push([s[0],s[1],s[3]||""]);}}
+  }
+  // collect all staff agents (non-truck)
+  const staff=Object.entries(LOG.agents).filter(([,a])=>a.role!=="truck");
+  if(!staff.length){tl.innerHTML="";return;}
+  // build timeline rows
+  const pxPerSec=1; // 1px = 1 sim second; track width will scale via CSS
+  const trackWidth=Math.max(600,end*pxPerSec);
+  const rows=staff.map(([name,a])=>{
+    const segs=a.segs||[];
+    const dutyStart=segs.length?segs[0][0]:0;
+    const dutyEnd=segs.length?segs[segs.length-1][1]:end;
+    const busy=segs.filter(s=>s[3]&&s[3]!=="walk"&&s[3]!=="idle").map(s=>[s[0],s[1],s[3]]);
+    const breaksA=brkByAgent[name]||[];
+    const vehA=vehByAgent[name]||[];
+    const dutyPct=dutyStart/end*100;
+    const dutyW=(dutyEnd-dutyStart)/end*100;
+    return`
+      <div class="stl-row" data-agent="${esc(name)}">
+        <span class="stl-name">${esc(name)} <span class="stl-role" style="color:var(--mut);font-weight:400">${ROLE_LABEL[a.role]||a.role}</span></span>
+        <div class="stl-track" style="width:${trackWidth}px" data-agent="${esc(name)}">
+          <div class="stl-bar duty" style="left:${dutyPct}%;width:${dutyW}%;" title="duty ${fmt(T0+dutyStart)}–${fmt(T0+dutyEnd)}"><span class="stl-tooltip">duty ${fmt(T0+dutyStart)}–${fmt(T0+dutyEnd)}</span></div>
+          ${busy.map(([s,e,l])=>`<div class="stl-bar busy" style="left:${s/end*100}%;width:${(e-s)/end*100}%;" title="${esc(l)} ${fmt(T0+s)}–${fmt(T0+e)}"><span class="stl-tooltip">${esc(l)} ${fmt(T0+s)}–${fmt(T0+e)}</span></div>`).join("")}
+          ${breaksA.map(([s,e])=>`<div class="stl-bar break" style="left:${s/end*100}%;width:${(e-s)/end*100}%;" title="break ${fmt(T0+s)}–${fmt(T0+e)}"><span class="stl-tooltip">break ${fmt(T0+s)}–${fmt(T0+e)}</span></div>`).join("")}
+          ${vehA.map(([s,e,l])=>`<div class="stl-bar veh" style="left:${s/end*100}%;width:${(e-s)/end*100}%;" title="${esc(l)} ${fmt(T0+s)}–${fmt(T0+e)}"><span class="stl-tooltip">${esc(l)} ${fmt(T0+s)}–${fmt(T0+e)}</span></div>`).join("")}
+        </div>
+      </div>`;
+  }).join("");
+  tl.innerHTML=`<div style="overflow-x:auto">${rows}</div>
+    <div class="stl-legend">
+      <span><i style="background:var(--line);opacity:.35"></i> shift</span>
+      <span><i style="background:var(--acc)"></i> busy</span>
+      <span><i style="background:#2a1a1a;background-image:repeating-linear-gradient(135deg,rgba(255,80,80,.25) 0 3px,transparent 3px 6px);border:1px solid #4a2a2a"></i> istirahat</span>
+      <span><i style="background:#ffdd57;opacity:.85"></i> truk</span>
+    </div>`;
+  // store break map for playhead indicator
+  window.__breakMap=brkByAgent;
 }
 
 /* runs list + load */

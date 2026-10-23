@@ -10,15 +10,21 @@ opening stock all come from the WMS repository (github.com/mxxham/WMS):
 Those were extracted once into data/bins.csv, data/items.csv, data/stock.csv.
 
 Flows
-    Inbound truck : gate queue -> dock door -> unload (pemuat) -> receiving area
-                    -> checker (check + scan + assign a bin)
-                    -> forklift (low levels) / stacker (top levels) put-away.
+    Inbound truck : gate queue -> checker gate check (docs + pallets, rule 5)
+                    -> dock door -> ONE operator + ONE vehicle (forklift
+                    preferred, reach allowed) unloads each pallet to receiving;
+                    a loader may assist (halves per-pallet time, [ASSUMPTION]).
     Outbound truck: day-start allocation (FEFO, same rules as docs/ALLOCATOR.md)
-                    -> forklift/stacker pallet picks + picker hand picks into a
-                    staging lane -> checkers audit every line -> wait for the
-                    (late) truck -> pemuat load -> truck leaves.
-    Replenishment : forklift/stacker move leftovers of opened pallets and refill
-                    empty pickfaces (bin-to-bin).
+                    -> operator+vehicle pallet picks + picker hand picks into a
+                    staging lane -> checkers audit lines -> wait for the (late)
+                    truck -> loading by `loaders_per_truck` loaders AND one
+                    operator+vehicle, whole-truck time bounded to 15-20 min
+                    (grows with the load) -> truck leaves.
+    Replenishment : operator+vehicle (reach truck above level A) moves leftovers
+                    of opened pallets and refills empty pickfaces (bin-to-bin).
+    Breaks        : two shifts 08:00-21:00; break1 11:45-13:00, break2
+                    17:00-18:00 (config). Staff on an unfinished break never
+                    START a new task; a held task finishes first (assumption e).
 
     Outbound orders: with --schedule data/schedule.json (from extract_schedule.py)
     the outbound trucks are the REAL shipments of the "Schedule of the day" sheet
@@ -29,10 +35,23 @@ Flows
     through the morning.  Leaving both unset keeps --trucks as the day's total
     (every scheduled shipment + the remainder inbound).
 
-Staff (per the request): pickers, checkers, 2 forklifts, 2 stackers (reach
-trucks for the top of the rack), pemuat.  No operators/controllers/restockers.
+Pickface rule (docs/ALLOCATOR.md): any quantity < UPP (partial put-away,
+    leftover of an opened pallet, bin-to-bin remainder) goes into the SKU's
+    pickface when free, else the nearest empty level-A bin, else it stays put
+    (retried every t_reassign_retry).  Full pallets: pickface if free, else
+    'BCDE' reserve (upstream behaviour).
+
+Staff (rule 2): 2 operators (op1, op2) each driving ONE vehicle at a time — every
+vehicle task holds one operator + one vehicle (op_veh/op_veh_release); 2
+forklifts (F1,F2) + 2 reach trucks (R1,R2) as vehicles; checker/picker/loader
+pools ch*/pk*/ld*.  No restocker or inventory-controller pool.
+Vehicles used: reach for rack levels B-E (stacker_min_lv=1), forklift for
+level A/floor, either type at the dock (forklift preferred).
 
 Run:  python wms_sim.py --out out
+Tests: python tests/test_fefo.py  (layout + FEFO, untouched)
+       python tests/test_ops.py   (breaks, one-vehicle-per-operator,
+                                   pickface rule, 15-20 min loading, balance)
 """
 
 from __future__ import annotations
@@ -249,6 +268,7 @@ class Agent:
         self.x, self.z, self.lane = home
         self.home = home
         self.segs = []  # [t0, t1, [(x,z),...], label, carry]
+        self.starts = []  # wall times when a task was acquired (new task starts)
         self.busy = 0.0
         self._t0 = 0.0
 
@@ -257,9 +277,14 @@ class Agent:
 
 
 class Pool:
+    """Staff or vehicle pool.
+
+    FilterStore: `grab()` only hands out agents that are NOT on break, so a
+    waiting task can never start while its worker has a break due."""
+
     def __init__(self, env, role, n, home):
         self.role = role
-        self.store = simpy.Store(env)
+        self.store = simpy.FilterStore(env)
         self.agents = [
             Agent(f"{role[:3].upper()}{i + 1}", role, home) for i in range(n)
         ]
@@ -312,20 +337,27 @@ class Truck:
     t_leave: float = None
     door: int = -1
     states: list = field(default_factory=list)
+    helper_on: bool = False  # a loader is assisting the inbound unload
+    unloaded: object = None  # event: all inbound pallets off the truck
+    load_min: float = None  # outbound: bounded whole-truck loading time (min)
+    loaders_used: int = 0  # outbound: loaders attached to the load
 
 
 # --------------------------------------------------------------------------- configuration
 @dataclass
 class Config:
     seed: int = 7
-    start_hhmm: str = "07:00"
+    start_hhmm: str = "08:00"
     # staff and equipment (from the request)
     n_pickers: int = 2
     n_checkers: int = 2
+    n_operators: int = 2  # op1+op2, each driving ONE vehicle per task
     n_stackers: int = 2  # reach trucks, put away / pick from the TOP levels
     n_forklifts: int = 2  # low levels and floor moves
     n_loaders: int = 4  # pemuat
-    stacker_min_lv: int = 2  # level index (0=A .. 4=E); >= this -> stacker
+    stacker_min_lv: int = (
+        1  # level index (0=A .. 4=E): >= this is reach-truck work (B-E, [ASSUMPTION])
+    )
     dock_doors: int = 2  # 7 gates built; 2 normally used (sometimes 3)
     staging_lanes: int = 8  # STG_01..STG_08 from the seed
     recv_spots: int = 16
@@ -374,6 +406,44 @@ class Config:
     t_pick_base: float = 12
     t_drop: float = 10
 
+    # ASSUMPTIONS TO CONFIRM (guesses; adjust via --overrides or Config())
+    # - Shift assignments per role (1=shift1 08-17, 2=shift2 13-21, 3=all-day 08-21):
+    #   operators: [1,2], checkers: [1,2], loaders: [1,1,2,2], pickers: [3,3]
+    # - Truck capacities by type: {"CDD":6,"CDE":10,"WBX":16,"C20":8,"GRM":10,"TRAGA":14,"default":12}
+    # - Loaders per truck: 2; loaders also unload inbound; load_operator_vehicle=True
+    # - Load times: t_load_base_min=15, t_load_min_min=15, t_load_max_min=20
+    # - Reassignment retry window: t_reassign_retry=600s
+    shift1: tuple = ("08:00", "17:00")
+    shift2: tuple = ("13:00", "21:00")
+    break1: tuple = ("11:45", "13:00")
+    break2: tuple = ("17:00", "18:00")
+    staff_duty: dict = field(
+        default_factory=lambda: {
+            "operator": [1, 2],
+            "checker": [1, 2],
+            "loader": [1, 1, 2, 2],
+            "picker": [3, 3],
+        }
+    )
+    loaders_unload_inbound: bool = True
+    loaders_per_truck: int = 2
+    load_operator_vehicle: bool = True
+    t_load_base_min: float = 15.0
+    t_load_min_min: float = 15.0
+    t_load_max_min: float = 20.0
+    truck_capacity: dict = field(
+        default_factory=lambda: {
+            "CDD": 6,
+            "CDE": 10,
+            "WBX": 16,
+            "C20": 8,
+            "GRM": 10,
+            "TRAGA": 14,
+            "default": 12,
+        }
+    )
+    t_reassign_retry: float = 600.0
+
 
 # --------------------------------------------------------------------------- simulation
 class Sim:
@@ -385,6 +455,7 @@ class Sim:
         self.asof = date(2026, 9, 25)
         self.load_world()
         self.build_resources()
+        self._assign_duty_and_breaks()
         self.log = dict(bin_ev=[], recv_ev=[], lane_ev=[], series=[], notes=[])
         self.stats = dict(
             recv=0,
@@ -398,15 +469,23 @@ class Sim:
             audits=0,
             audit_fail=0,
             shortage_cartons=0,
+            break_wait_tasks=0,
         )
         self.bg = []
         self.finished = False
+        self.breaks_log = []
+        self.veh_segs = {}  # {veh_name: [[t0, t1, op_name, label], ...]}
 
     # ---- world ----
     @staticmethod
-    def _clock(hhmm):
+    def hhmm_to_sec(hhmm: str) -> int:
+        """Parse 'HH:MM' to seconds since midnight."""
         h, m = hhmm.split(":")
         return int(h) * 3600 + int(m) * 60
+
+    @staticmethod
+    def _clock(hhmm: str) -> int:
+        return Sim.hhmm_to_sec(hhmm)
 
     def hhmm(self, t):
         s = int(self.t0 + t)
@@ -462,12 +541,30 @@ class Sim:
 
     def build_resources(self):
         c, env = self.cfg, self.env
+        self.operators = Pool(env, "operator", c.n_operators, (-4.0, -11.0, FRONT))
         self.pickers = Pool(env, "picker", c.n_pickers, HOME)
         self.checkers = Pool(env, "checker", c.n_checkers, HOME)
-        self.stackers = Pool(env, "stacker", c.n_stackers, (-7.0, -12.0, FRONT))
+        self.stackers = Pool(env, "reach", c.n_stackers, (-7.0, -12.0, FRONT))
         self.forklifts = Pool(env, "forklift", c.n_forklifts, (-4.0, -11.0, FRONT))
         self.loaders = Pool(env, "loader", c.n_loaders, HOME)
+
+        # Name agents per the real org chart: 2 operators drive all vehicles;
+        # F*/R1 are the forklift/reach-truck *vehicles*, not staff.
+        for i, a in enumerate(self.operators.agents):
+            a.name = f"op{i + 1}"
+        for i, a in enumerate(self.checkers.agents):
+            a.name = f"ch{i + 1}"
+        for i, a in enumerate(self.pickers.agents):
+            a.name = f"pk{i + 1}"
+        for i, a in enumerate(self.loaders.agents):
+            a.name = f"ld{i + 1}"
+        for i, a in enumerate(self.forklifts.agents):
+            a.name = f"F{i + 1}"
+        for i, a in enumerate(self.stackers.agents):
+            a.name = f"R{i + 1}"
+
         self.pools = [
+            self.operators,
             self.pickers,
             self.checkers,
             self.stackers,
@@ -485,6 +582,77 @@ class Sim:
             self.recv.put(i)
         self.wait_spots = list(range(40))
         self.agents = [a for p in self.pools for a in p.agents]
+
+    def _assign_duty_and_breaks(self):
+        """Assign duty windows and break windows to each staff agent based on Config.
+
+        Shift definitions (seconds since day start at self.t0):
+          shift1: 08:00-17:00
+          shift2: 13:00-21:00
+          break1: 11:45-13:00 (within shift1)
+          break2: 17:00-18:00 (within shift2)
+
+        staff_duty maps role -> list of shift indices per agent (1=shift1, 2=shift2, 3=all-day).
+        All-day agents (3) get BOTH breaks. Agents get only the break(s) that fall within their duty window.
+        An agent keeps working past duty end only if mid-task (no auto-shutdown logic).
+        """
+        c = self.cfg
+
+        # Convert shift/break HH:MM to seconds since self.t0
+        def to_rel(hhmm: str) -> int:
+            return self.hhmm_to_sec(hhmm) - self.t0
+
+        s1_start, s1_end = to_rel(c.shift1[0]), to_rel(c.shift1[1])
+        s2_start, s2_end = to_rel(c.shift2[0]), to_rel(c.shift2[1])
+        b1_start, b1_end = to_rel(c.break1[0]), to_rel(c.break1[1])
+        b2_start, b2_end = to_rel(c.break2[0]), to_rel(c.break2[1])
+
+        shifts = {
+            1: (s1_start, s1_end),
+            2: (s2_start, s2_end),
+            3: (s1_start, s2_end),  # all-day: 08:00-21:00
+        }
+        breaks = [
+            (b1_start, b1_end),  # break1
+            (b2_start, b2_end),  # break2
+        ]
+
+        # Map pool role names to staff_duty keys (vehicles take no breaks)
+        role_to_duty_key = {
+            "operator": "operator",
+            "picker": "picker",
+            "checker": "checker",
+            "loader": "loader",
+        }
+
+        # First pass: initialize all agents with defaults
+        for pool in self.pools:
+            for agent in pool.agents:
+                agent.on_break = False
+                agent.duty = (0, float("inf"))
+                agent.breaks = []
+
+        # Second pass: assign duty/breaks for mapped roles
+        for pool in self.pools:
+            duty_key = role_to_duty_key.get(pool.role)
+            if not duty_key:
+                continue
+            duty_list = c.staff_duty.get(duty_key, [])
+            for i, agent in enumerate(pool.agents):
+                shift_idx = duty_list[i] if i < len(duty_list) else 1
+                d0, d1 = shifts.get(shift_idx, shifts[1])
+                agent.duty = (d0, d1)
+                # Assign breaks that intersect with duty window
+                agent.breaks = []
+                for b_start, b_end in breaks:
+                    # Break must be fully within duty window (or at least overlap)
+                    if b_end <= d0 or b_start >= d1:
+                        continue
+                    # Clamp break to duty window
+                    br_start = max(b_start, d0)
+                    br_end = min(b_end, d1)
+                    if br_start < br_end:
+                        agent.breaks.append((br_start, br_end))
 
     # ---- helpers ----
     def lane_pt(
@@ -520,15 +688,43 @@ class Sim:
         self.log["notes"].append([round(self.env.now, 1), text])
 
     def grab(self, pool):
+        """Acquire a staff member or vehicle. Break-gated: only agents NOT on
+        an unfinished break are handed out, so no new task can start during a
+        break; a task that already holds its workers finishes (assumption e).
+        Waits started while the pool was break-limited are counted."""
         t = self.env.now
-        a = yield pool.store.get()
+        brk = [a for a in pool.agents if getattr(a, "on_break", False)]
+        a = yield pool.store.get(lambda x: not getattr(x, "on_break", False))
         pool.waits.append(self.env.now - t)
+        if self.env.now > t and brk:
+            self.stats["break_wait_tasks"] += 1
         a._t0 = self.env.now
+        a.starts.append(round(self.env.now, 1))
         return a
 
     def release(self, pool, a):
         a.busy += self.env.now - a._t0
         pool.store.put(a)
+
+    def op_veh(self, label, lv=None, dock=False):
+        """One operator + one free vehicle of the right type for a task.
+
+        A task needs exactly one operator plus one vehicle: an operator can
+        never hold two vehicles, because both are granted together here and
+        released together. Vehicles may sit idle while operators are the limit.
+        Reach trucks serve levels B-E (stacker_min_lv); dock work (truck
+        load/unload) prefers a free forklift, either type serves."""
+        op = yield from self.grab(self.operators)
+        pool = self.veh(lv, dock)
+        fk = yield from self.grab(pool)
+        ent = [round(self.env.now, 1), None, op.name, label]
+        self.veh_segs.setdefault(fk.name, []).append(ent)
+        return op, fk, pool, ent
+
+    def op_veh_release(self, pool, op, fk, ent):
+        ent[1] = round(self.env.now, 1)
+        self.release(pool, fk)
+        self.release(self.operators, op)
 
     def travel(self, agents, dest, speed, label, carry=0):
         a0 = agents[0]
@@ -844,45 +1040,56 @@ class Sim:
             )
 
     # ---- movement of pallets by forklift / stacker ----
-    def veh(self, lv):
-        """Vehicle for a rack level: reach truck (stacker) at the top, forklift below."""
-        return self.stackers if lv >= self.cfg.stacker_min_lv else self.forklifts
+    def veh(self, lv=None, dock=False):
+        """Vehicle pool for a move.
 
-    def pick_up(self, p, fk):
+        - Reach trucks (self.stackers) serve rack levels B-E: put-away above
+          level A, picks from upper levels, lowering a pallet (dock=False and
+          lv >= stacker_min_lv).
+        - Forklifts serve level A / floor; dock work prefers a free forklift
+          but either type serves (dock=True)."""
+        if dock:
+            return self.forklifts if self.forklifts.store.items else self.stackers
+        if lv is not None and lv >= self.cfg.stacker_min_lv:
+            return self.stackers
+        return self.forklifts
+
+    def pick_up(self, p, veh):
         """The vehicle takes a pallet out of its bin (or off the floor)."""
         b = p.bin
         if b is not None:
-            yield from self.act([fk], self.lift_time(b.lv), "lift")
+            yield from self.act(veh, self.lift_time(b.lv), "lift")
             b.pallet = None
             p.loc = b.access()
             p.bin = None
             self.bin_ev(b, 3)
         else:
-            yield from self.act([fk], self.cfg.t_fork_pos, "lift")
+            yield from self.act(veh, self.cfg.t_fork_pos, "lift")
 
-    def put_down(self, p, b, fk):
-        yield from self.act([fk], self.lift_time(b.lv), "place")
+    def put_down(self, p, b, veh):
+        yield from self.act(veh, self.lift_time(b.lv), "place")
         b.pallet = p
         b.claim = None
         p.bin, p.loc = b, None
         self.bin_ev(b, 3)
 
     def carry_job(self, p, target, label):
-        """Forklift or stacker moves pallet p into `target` bin.
+        """One operator + one vehicle move pallet p into `target` bin.
 
-        The vehicle itself drives it: the stacker (reach truck) handles the top
-        levels, the forklift the lower ones and the floor."""
-        pool = self.veh(target.lv)
-        fk = yield from self.grab(pool)
-        yield from self.travel([fk], p.access(), self.cfg.fork_empty, "to_pallet")
+        The vehicle carries the pallet (reach truck above level A
+        stacker_min_lv, forklift below); the operator rides/drives it for the
+        whole move, so an operator holds at most one vehicle at a time."""
+        op, fk, pool, ent = yield from self.op_veh(label, lv=target.lv)
+        cons = [op, fk]
+        yield from self.travel(cons, p.access(), self.cfg.fork_empty, "to_pallet")
         with p.lock.request() as rq:
             yield rq
-            yield from self.pick_up(p, fk)
+            yield from self.pick_up(p, cons)
             yield from self.travel(
-                [fk], target.access(), self.cfg.fork_loaded, label, carry=1
+                cons, target.access(), self.cfg.fork_loaded, label, carry=1
             )
-            yield from self.put_down(p, target, fk)
-        self.release(pool, fk)
+            yield from self.put_down(p, target, cons)
+        self.op_veh_release(pool, op, fk, ent)
 
     def nearest_empty(self, from_pt, levels="ABCDE", pickfaces_ok=False):
         pf_set = {b.code for b in self.pickface.values()}
@@ -901,12 +1108,14 @@ class Sim:
 
     # ---- background jobs ----
     def relocate_leftover(self, p):
-        """Bin-to-bin: leftover of an opened pallet goes to the SKU's pickface (if empty) or the nearest empty level-A bin."""
+        """Bin-to-bin: leftover of an opened pallet goes to the SKU's pickface
+        (if free) or the nearest empty level-A bin (overflow). With no free
+        level-A slot it stays put (docs/ALLOCATOR.md: 'tetap di bin')."""
         pf = self.pickface.get(p.sku)
         if pf and pf.pallet is None and pf.claim is None:
             tgt = pf
         else:
-            tgt = self.nearest_empty(p.access(), "A") or self.nearest_empty(p.access())
+            tgt = self.nearest_empty(p.access(), "A")
         if tgt is None:
             p.relocating = False
             return
@@ -947,65 +1156,133 @@ class Sim:
         return pr
 
     # ---- inbound ----
+    def putaway_target(self, sku, qty, from_pt=None):
+        """Pure pickface rule (docs/ALLOCATOR.md): any quantity less than UPP
+        never enters a reserve pallet bin — it goes into the SKU's pickface
+        when that is free, else the nearest empty level-A slot, else None
+        (goods stay put and a retry re-plans them). Full pallets (qty >= UPP)
+        keep the pickface-if-free then reserve 'BCDE' preference."""
+        upp = self.items[sku].upp
+        pf = self.pickface.get(sku)
+        pt = from_pt if from_pt is not None else (0.0, 0.0, FRONT)
+        free = pf is not None and pf.pallet is None and pf.claim is None
+        if qty < upp:
+            if free:
+                return pf
+            return self.nearest_empty(pt, "A")
+        if free:
+            return pf
+        return self.nearest_empty(pt, "BCDE") or self.nearest_empty(pt)
+
     def receive_pallet(self, truck, p, spot):
+        """Put-away of a received pallet by one operator + one vehicle
+        (checkers sit at the gate; they do not assign bins or drive)."""
         c = self.cfg
-        ck = yield from self.grab(self.checkers)
-        yield from self.travel([ck], self.recv_pt(spot), c.walk, "walk")
-        yield from self.act([ck], c.t_check_pallet + c.t_scan + c.t_assign, "check")
-        pf = self.pickface.get(p.sku)
-        if pf and pf.pallet is None and pf.claim is None:
-            tgt = pf
-        else:
-            tgt = self.nearest_empty(self.recv_pt(spot), "BCDE") or self.nearest_empty(
-                self.recv_pt(spot)
-            )
-        tgt.claim = p
-        self.release(self.checkers, ck)
         p.loc = self.recv_pt(spot)
-        yield from self.carry_job(p, tgt, "putaway")
+        tgt = self.putaway_target(p.sku, p.qty, p.loc)
+        if tgt is None:  # partial with no open slot: goods stay in receiving
+            self.note(
+                f"{self.hhmm(self.env.now)} {p.sku} x{p.qty}"
+                f" stays in recv: no free level-A slot yet"
+            )
+            for _ in range(12):  # ~2h max of 'stays put', then overflow once
+                yield self.env.timeout(c.t_reassign_retry)
+                amt = self.putaway_target(p.sku, p.qty, p.loc)
+                if amt is not None:
+                    break
+            else:
+                amt = self.nearest_empty(p.loc)  # last resort: any reserve slot
+                if amt is not None:
+                    self.note(
+                        f"{self.hhmm(self.env.now)} {p.sku} x{p.qty}"
+                        f" overflowed to {amt.code} (no level-A slot)"
+                    )
+            if amt is None:
+                self.note(
+                    f"{self.hhmm(self.env.now)} {p.sku} x{p.qty}"
+                    f" still in recv: warehouse full - giving up"
+                )
+                self.log["recv_ev"].append([round(self.env.now, 1), spot, 0])
+                self.recv.put(spot)
+                return
+            tgt = amt
+        tgt.claim = p
+        op, fk, pool, ent = yield from self.op_veh(
+            f"putaway {p.sku} x{p.qty}", lv=tgt.lv
+        )
+        cons = [op, fk]
+        yield from self.act(cons, c.t_assign, "assign")  # desk/cabin step
+        yield from self.travel(cons, p.access(), c.fork_empty, "to_pallet")
+        with p.lock.request() as rq:
+            yield rq
+            yield from self.pick_up(p, cons)
+            yield from self.travel(cons, tgt.access(), c.fork_loaded, "putaway", 1)
+            yield from self.put_down(p, tgt, cons)
+        self.op_veh_release(pool, op, fk, ent)
         self.log["recv_ev"].append([round(self.env.now, 1), spot, 0])
         self.recv.put(spot)
         self.sku_pallets[p.sku].add(p)
         self.stats["stored"] += 1
 
     def unload_pallet(self, truck, p):
+        """Inbound unload: one operator + one vehicle (forklift preferred at the
+        dock). With a loader helping out (assumption b, default yes) the
+        per-pallet work halves: forklifts do the heavy pallets.
+
+        The receiving spot is claimed BEFORE the crew, so truck backpressure
+        never strands both operators as unloaders: put-away (same operator
+        pool) can always progress and free spots."""
         c = self.cfg
-        ld = yield from self.grab(self.loaders)
-        yield from self.travel([ld], self.door_pt(truck.door), c.jack, "walk")
-        yield from self.act([ld], c.t_unload_pallet, "unload")
         spot = yield self.recv.get()
-        yield from self.travel([ld], self.recv_pt(spot), c.jack, "move", carry=1)
+        op, fk, pool, ent = yield from self.op_veh(
+            f"unload {p.sku} T{truck.tid}", dock=True
+        )
+        cons = [op, fk]
+        factor = 0.5 if getattr(truck, "helper_on", False) else 1.0
+        yield from self.travel(cons, self.door_pt(truck.door), c.fork_empty, "to_truck")
+        yield from self.act(cons, c.t_unload_pallet * factor, "unload")
+        yield from self.travel(cons, self.recv_pt(spot), c.fork_loaded, "move", carry=1)
+        yield from self.act(cons, c.t_fork_pos, "drop")
         p.loc = self.recv_pt(spot)
+        self.op_veh_release(pool, op, fk, ent)
         self.log["recv_ev"].append([round(self.env.now, 1), spot, 1])
-        self.release(self.loaders, ld)
         self.stats["recv"] += 1
         self.spawn(self.receive_pallet(truck, p, spot))
+
+    def loader_helper(self, tr):
+        """One loader assists the whole unload of truck tr (assumption b)."""
+        ld = yield from self.grab(self.loaders)
+        yield from self.travel([ld], self.door_pt(tr.door), self.cfg.walk, "walk")
+        yield from self.act([ld], 2, "assist_unload")
+        yield tr.unloaded
+        self.release(self.loaders, ld)
 
     # ---- outbound ----
     def fl_picklist(self, sh, tasks):
         c = self.cfg
         for t in sorted(tasks, key=lambda t: t.pallet.key()):
             p = t.pallet
-            pool = self.veh(p.bin.lv if p.bin else 0)
-            fk = yield from self.grab(pool)
-            yield from self.travel([fk], p.access(), c.fork_empty, "to_pallet")
+            lv = p.bin.lv if p.bin else 0
+            op, fk, pool, ent = yield from self.op_veh(f"pick {p.sku} x{t.take}", lv=lv)
+            cons = [op, fk]
+            yield from self.travel(cons, p.access(), c.fork_empty, "to_pallet")
             with p.lock.request() as rq:
                 yield rq
                 was_pf = p.bin is not None and self.pickface.get(p.sku) is p.bin
-                yield from self.pick_up(p, fk)
+                yield from self.pick_up(p, cons)
                 yield from self.travel(
-                    [fk],
+                    cons,
                     self.lane_pt(sh.lane),
                     c.fork_loaded,
                     "to_staging",
                     carry=1,
                 )
-                yield from self.act([fk], c.t_drop, "drop")
+                yield from self.act(cons, c.t_drop, "drop")
                 p.loc = self.lane_pt(sh.lane)
                 self.sku_pallets[p.sku].discard(p)
                 p.qty -= t.take
                 p.reserved -= t.take
-            self.release(pool, fk)
+            self.op_veh_release(pool, op, fk, ent)
             sh.staged += 1
             self.stats["fl_picks"] += 1
             self.stats["picked_cartons"] += t.take
@@ -1016,16 +1293,19 @@ class Sim:
                 self.maybe_replen(p.sku)
 
     def lower_pallet(self, p):
-        """A pallet in a rack level B-E is brought down to the floor so a picker can open it."""
-        pool = self.veh(p.bin.lv if p.bin else 0)
-        fk = yield from self.grab(pool)
-        yield from self.travel([fk], p.access(), self.cfg.fork_empty, "to_pallet")
+        """A pallet in a rack level B-E is brought down to the floor so a picker
+        can open it (operator + reach truck)."""
+        op, fk, pool, ent = yield from self.op_veh(
+            "lower_pallet", lv=p.bin.lv if p.bin else 0
+        )
+        cons = [op, fk]
+        yield from self.travel(cons, p.access(), self.cfg.fork_empty, "to_pallet")
         with p.lock.request() as rq:
             yield rq
             if p.bin is not None:
-                yield from self.pick_up(p, fk)
-                yield from self.act([fk], 8, "place")
-        self.release(pool, fk)
+                yield from self.pick_up(p, cons)
+                yield from self.act(cons, 8, "place")
+        self.op_veh_release(pool, op, fk, ent)
 
     def hp_picklist(self, sh, tasks):
         c = self.cfg
@@ -1121,24 +1401,53 @@ class Sim:
             else 0
         )
         n_load = sh.staged + n_mixed
-        door = self.trucks[sh.truck - 1].door
-        loads = [env.process(self.load_one(sh, door)) for _ in range(n_load)]
-        if loads:
-            yield env.all_of(loads)
+        tr = self.trucks[sh.truck - 1]
+        if n_load:
+            yield from self.load_truck(sh, tr.door, tr, n_load)
         sh.loaded_t = env.now
         self.stats["shipped"] += n_load
         self.log["lane_ev"].append([round(env.now, 1), sh.lane, -1, sh.truck])
         self.lanes.put(sh.lane)
         sh.loaded.succeed()
 
-    def load_one(self, sh, door):
+    def load_min(self, n_units, ttype):
+        """Whole-truck loading time, growing with the truck's load and bounded
+        to [t_load_min_min, t_load_max_min] = 15..20 min (config)."""
         c = self.cfg
-        ld = yield from self.grab(self.loaders)
-        yield from self.travel([ld], self.lane_pt(sh.lane), c.jack, "walk")
-        yield from self.act([ld], c.t_load_pallet, "load")
-        yield from self.travel([ld], self.door_pt(door), c.jack, "move", 1)
-        yield from self.act([ld], 12, "load", 1)
-        self.release(self.loaders, ld)
+        cap = c.truck_capacity.get(ttype, c.truck_capacity.get("default", 12))
+        mm = c.t_load_base_min + (c.t_load_max_min - c.t_load_base_min) * min(
+            1.0, n_units / cap
+        )
+        return min(max(mm, c.t_load_min_min), c.t_load_max_min)
+
+    def load_truck(self, sh, door, tr, n_units):
+        """Outbound truck loading (rule 3+4).
+
+        The 4 loaders load the trucks; a load is NOT a loaders-only task: it
+        also holds one operator and one vehicle (forklift at the dock, reach if
+        the forklift pool is idle-less) for the whole window. Elapsed time is
+        bounded to 15-20 minutes, growing with pallets/cartons.
+        """
+        c = self.cfg
+        mm = self.load_min(n_units, sh.ttype)
+        t0 = self.env.now
+        op, fk, pool, ent = yield from self.op_veh(
+            f"load T{tr.tid} {sh.sid}", dock=True
+        )
+        lds = []
+        for _ in range(c.loaders_per_truck):
+            ld = yield from self.grab(self.loaders)
+            lds.append(ld)
+        team = [op, fk] + lds
+        yield from self.travel(team, self.lane_pt(sh.lane), c.jack, "walk")
+        yield from self.act(team, mm * 60.0, "load")
+        yield from self.travel([op, fk], self.door_pt(door), c.jack, "to_dock", carry=1)
+        yield from self.act([op, fk], 30, "load", carry=1)
+        tr.load_min = round(mm, 2)
+        tr.loaders_used = len(lds)
+        for ld in lds:
+            self.release(self.loaders, ld)
+        self.op_veh_release(pool, op, fk, ent)
 
     # ---- trucks ----
     def tlog(self, tr, state):
@@ -1159,6 +1468,17 @@ class Sim:
             f"{self.hhmm(env.now)} Truck {tr.tid} ({'inbound' if tr.kind == 'IN' else 'outbound'}) arrived "
             f"{'+' if late >= 0 else ''}{late:.0f} min vs plan"
         )
+        # Gate check (rule 5): the truck waits at the gate until a checker is
+        # free; checkers do not drive vehicles and do not do put-away.
+        ck = yield from self.grab(self.checkers)
+        yield from self.travel([ck], (wx, wz, FRONT), c.walk, "walk")
+        gate_work = (
+            c.t_doc_check + len(tr.pallets) * c.t_check_pallet
+            if tr.kind == "IN"
+            else c.t_doc_check
+        )
+        yield from self.act([ck], gate_work, "doc_check")
+        self.release(self.checkers, ck)
         tr.door = yield self.doors.get()
         self.wait_spots.insert(0, spot)
         self.wait_spots.sort()
@@ -1169,13 +1489,15 @@ class Sim:
         )
         self.tlog(tr, "docked")
         if tr.kind == "IN":
+            tr.helper_on = bool(c.loaders_unload_inbound) and any(
+                not getattr(a2, "on_break", False) for a2 in self.loaders.agents
+            )
+            if tr.helper_on:
+                self.spawn(self.loader_helper(tr))
             procs = [env.process(self.unload_pallet(tr, p)) for p in tr.pallets]
             if procs:
                 yield env.all_of(procs)
-            ck = yield from self.grab(self.checkers)
-            yield from self.travel([ck], self.door_pt(tr.door), c.walk, "walk")
-            yield from self.act([ck], c.t_doc_check, "check")
-            self.release(self.checkers, ck)
+            tr.unloaded.succeed()
         else:
             tr.ship.docked.succeed()
             yield tr.ship.loaded
@@ -1210,11 +1532,19 @@ class Sim:
         gate = sum(
             1 for tr in self.trucks if tr.t_gate is not None and tr.t_dock is None
         )
+        busy = {
+            p.role: sum(
+                a.busy + (self.env.now - a._t0 if self._is_busy(p, a) else 0)
+                for a in p.agents
+            )
+            for p in self.pools
+        }
         self.log["series"].append(
             dict(
                 t=round(t),
                 gate=gate,
                 doors=self.cfg.dock_doors - len(self.doors.items),
+                q_operator=self.operators.queue,
                 q_forklift=self.forklifts.queue,
                 q_stacker=self.stackers.queue,
                 q_picker=self.pickers.queue,
@@ -1227,13 +1557,10 @@ class Sim:
                 shipped=self.stats["shipped"],
                 picked=self.stats["picked_cartons"],
                 replen=self.stats["replen"] + self.stats["reloc"],
-                busy={
-                    p.role: sum(
-                        a.busy + (self.env.now - a._t0 if self._is_busy(p, a) else 0)
-                        for a in p.agents
-                    )
-                    for p in self.pools
-                },
+                busy=busy,
+                busy_op=busy.get("operator", 0),
+                busy_f=busy.get("forklift", 0),
+                busy_r=busy.get("reach", 0),
             )
         )
 
@@ -1241,6 +1568,99 @@ class Sim:
         while not self.finished:
             self.sample()
             yield self.env.timeout(60)
+
+    def break_control(self):
+        """Central process managing agent break flags.
+
+        Steps through sorted boundaries of all break windows + day boundaries (08:00-21:00).
+        At each boundary, updates on_break flags for agents whose duty covers the current time.
+        Logs break start/end to self.breaks_log and self.log["notes"].
+
+        Approximation (assumption e): at window start, only agents currently idle (in pool store)
+        are marked on_break. Busy agents keep working and the window "burns" for them (not logged).
+        At window end, all agents in that window have on_break set to False.
+        """
+        c = self.cfg
+        # Collect all unique break boundaries across all agents
+        boundaries = set()
+        for a in self.agents:
+            for b_start, b_end in getattr(a, "breaks", []):
+                boundaries.add(b_start)
+                boundaries.add(b_end)
+            d0, d1 = getattr(a, "duty", (0, float("inf")))
+            for d in (d0, d1):
+                if math.isfinite(d):
+                    boundaries.add(d)
+        # Add day boundaries (08:00 and 21:00 relative to t0)
+        day_start = self.hhmm_to_sec("08:00") - self.t0
+        day_end = self.hhmm_to_sec("21:00") - self.t0
+        boundaries.add(day_start)
+        boundaries.add(day_end)
+
+        sorted_bounds = sorted(boundaries)
+
+        # For each interval between boundaries, determine which agents are on break
+        for i in range(len(sorted_bounds) - 1):
+            t0 = sorted_bounds[i]
+            t1 = sorted_bounds[i + 1]
+            if t0 >= t1:
+                continue
+
+            # Midpoint of interval to test break membership
+            t_mid = (t0 + t1) / 2
+            flags_before = [a.on_break for a in self.agents]
+
+            # Find agents whose duty does not cover t_mid or whose break
+            # window covers t_mid: an agent operating today but outside duty
+            # (shift edges) is effectively off; agents on an intraday break
+            # are on break. Both states are guided through the same
+            # availability flag ('on_break' = not acquirable for NEW tasks).
+            for a in self.agents:
+                duty_start, duty_end = getattr(a, "duty", (0, float("inf")))
+                on_duty = duty_start <= t_mid < duty_end
+                in_break = any(
+                    b_start <= t_mid < b_end
+                    for b_start, b_end in getattr(a, "breaks", [])
+                )
+
+                if a.on_break and on_duty and not in_break:
+                    # Duty started or break window ended: agent is available
+                    # for new tasks again.
+                    a.on_break = False
+                    self.note(f"{self.hhmm(t0)} BREAK {a.name} off")
+                elif not a.on_break and not on_duty:
+                    # Shift edge: agent off today (a task already started may
+                    # still run into it; the flag only gates NEW tasks).
+                    a.on_break = True
+                elif not a.on_break and in_break:
+                    # Break window starts: every agent on duty goes on break.
+                    # A task already in progress is unaffected (it holds the
+                    # agent outside the store); when it finishes mid-window,
+                    # the released agent is simply kept out of new tasks until
+                    # the window ends, i.e. the break absorbs the remainder
+                    # (assumption e default: he finishes the task first).
+                    a.on_break = True
+                    win = next(
+                        (b for b in a.breaks if b[0] <= t_mid < b[1]),
+                        (t0, t1),
+                    )
+                    self.breaks_log.append(
+                        [a.name, a.role, round(win[0], 1), round(win[1], 1)]
+                    )
+                    self.note(f"{self.hhmm(t0)} BREAK {a.name} on")
+
+            # Re-scan pending acquisition requests whenever a break flag
+            # flipped: agents released while on break were rejected by the
+            # store filter; once the flag is off, waiters that were (rightly)
+            # waiting for a free worker must finally proceed (a store put only
+            # re-triggers _do_get once, at the moment of the put).
+            if flags_before != [a.on_break for a in self.agents]:
+                for p in self.pools:
+                    p.store._trigger_get(None)
+
+            # Wait until next boundary
+            if self.env.now < t1:
+                yield self.env.timeout(t1 - self.env.now)
 
     def _is_busy(self, pool, a):
         return a not in pool.store.items
@@ -1250,8 +1670,10 @@ class Sim:
         self.trucks = self.make_trucks()
         for tr in self.trucks:
             tr.agent = Agent(f"T{tr.tid}", "truck", (0, -40, FRONT))
+            tr.unloaded = env.event()
         ships = [t.ship for t in self.trucks if t.ship]
         env.process(self.monitor())
+        env.process(self.break_control())
         env.process(self.allocate_shipments(ships))
         for sh in ships:
             env.process(self.shipment_proc(sh))
@@ -1301,6 +1723,13 @@ def kpis(sim: Sim):
         w = sorted(p.waits) or [0]
         k["avg_wait_min"][p.role] = round(statistics.mean(w) / 60, 2)
         k["p90_wait_min"][p.role] = round(w[int(0.9 * (len(w) - 1))] / 60, 2)
+    k["operator_util_pct"] = k["utilisation_pct"].get("operator", 0.0)
+    k["vehicle_util_pct"] = {
+        "forklift": k["utilisation_pct"].get("forklift", 0.0),
+        "reach": k["utilisation_pct"].get("reach", 0.0),
+    }
+    k["avg_wait_op_min"] = k["avg_wait_min"].get("operator", 0.0)
+    k["p90_wait_op_min"] = k["p90_wait_min"].get("operator", 0.0)
     rows = []
     for t in sim.trucks:
         s = t.ship
@@ -1326,9 +1755,16 @@ def kpis(sim: Sim):
                 dest=s.dest if s else "",
                 city=s.city if s else "",
                 ttype=s.ttype if s else "",
+                load_min=t.load_min if t.kind == "OUT" else None,
+                loaders_used=t.loaders_used if t.kind == "OUT" else 0,
             )
         )
     k["trucks"] = rows
+    by_type = {}
+    for r in rows:
+        tt = r["ttype"] or ("inbound" if r["type"] == "IN" else "unknown")
+        by_type[tt] = by_type.get(tt, 0) + 1
+    k["trucks_by_type"] = by_type
     k["truck_plan"] = dict(getattr(sim, "truck_plan", {}))
     if sim.cfg.schedule_file:
         k["schedule"] = dict(
@@ -1360,6 +1796,11 @@ def export(sim: Sim, outdir: Path):
             role=a.role,
             home=[a.home[0], a.home[1]] if a.role != "truck" else [0, -40],
             segs=a.segs,
+            task_starts=list(getattr(a, "starts", [])),
+            duty=list(getattr(a, "duty", []))
+            if not math.isinf(getattr(a, "duty", (0, float("inf")))[1])
+            else None,
+            breaks=[list(w) for w in getattr(a, "breaks", [])],
         )
     trucks = {
         t.tid: dict(
@@ -1414,6 +1855,11 @@ def export(sim: Sim, outdir: Path):
         lane_ev=sim.log["lane_ev"],
         series=sim.log["series"],
         notes=sim.log["notes"],
+        breaks=sim.breaks_log,
+        vehicle_segs={
+            veh: [e if e[1] is not None else [e[0], sim.end, e[2], e[3]] for e in es]
+            for veh, es in sim.veh_segs.items()
+        },
         agents=agents,
         trucks=trucks,
     )

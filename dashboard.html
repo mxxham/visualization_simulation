@@ -127,9 +127,10 @@ select{font:inherit;color:var(--ink);border:1px solid var(--grid);border-radius:
 const INK="#0b0b0b",INK2="#52514e",MUTED="#8a8984",GRID="#e3e2de",FLOOR="#f1f0ec";
 const ROLE={picker:{c:"#2a78d6",mk:"o",ms:7},checker:{c:"#6250d6",mk:"D",ms:6},
             loader:{c:"#1baf7a",mk:"s",ms:6},forklift:{c:"#eda100",mk:"s",ms:11},
-            stacker:{c:"#e87ba4",mk:"^",ms:8}};
-const ROLE_ORDER=["picker","checker","loader","forklift","stacker"];
-const ROLE_N={picker:"n_pickers",checker:"n_checkers",loader:"n_loaders",forklift:"n_forklifts",stacker:"n_stackers"};
+            stacker:{c:"#e87ba4",mk:"^",ms:8},reach:{c:"#e87ba4",mk:"^",ms:8},
+            operator:{c:"#d14330",mk:"o",ms:7}};
+const ROLE_ORDER=["picker","checker","loader","operator","forklift","reach","stacker"];
+const ROLE_N={picker:"n_pickers",checker:"n_checkers",loader:"n_loaders",forklift:"n_forklifts",stacker:"n_stackers",reach:"n_stackers",operator:"n_operators"};
 const IN_COLOR="#2a78d6",OUT_COLOR="#eb6834";
 const BIN_EMPTY="#d8dadb",BIN_FULL="#1f6f8b",BIN_PART="#7fb8cf",BIN_RESV="#e0a526";
 const FLASH={1:"#d14330",3:"#8e5bc7"},FLASH_S=45.0;
@@ -148,6 +149,7 @@ let frac=[],resv=[],flashUntil={},flashCol={};
 let laneState={},recvState={};
 let bptr=0,lptr=0,rptr=0,nptr=0;
 let tracks={},agents={},trucks={};
+let UROLE=null;   // utilisation-panel roles present in the loaded run
 let simT=0,nowShown=-1,playing=false,speed=16,lastTs=0;
 let curRun="default";
 let trow={};
@@ -172,6 +174,9 @@ async function loadRun(run){
   frac=log.initial_state.slice();resv=new Array(bins.length).fill(0);
   flashUntil={};flashCol={};laneState={};recvState={};bptr=lptr=rptr=nptr=0;
   tracks={};agents=log.agents;
+  // utilisation panel shows only the roles that exist in THIS run's log
+  // (new logs: operator/reach; legacy logs: stacker instead of operator/reach)
+  UROLE=ROLE_ORDER.filter(rt=>Object.values(agents).some(a=>a.role===rt));
   for(const[n,a]of Object.entries(agents)){
     tracks[n]={segs:a.segs,home:a.home,
       t0s:a.segs.map(s=>s[0]),
@@ -346,10 +351,10 @@ function rebuildStatic(){
   g.fillText("TRUCK YARD  |  "+doorsArr.length+" gates on the west wall, "+cfg.dock_doors+" active (green)",
              offX+(-58.5-WMIN)*S,proj(0,30.6)[1]);
   g.fillText("gate queue (trucks wait here for a free gate)",offX+(-58.5-WMIN)*S,proj(0,29.4)[1]);
-  // role legend bottom-left: white boxed, 2 columns x 3 rows (reference layout)
-  const rowsL=[["picker","forklift"],["checker","stacker"],["loader","carried"]];
+  // role legend bottom-left: white boxed, 2 columns x 4 rows
+  const rowsL=[["picker","forklift"],["checker","reach"],["operator","loader"],["carried",null]];
   const rowH=14,colW=104,pad=7;
-  const boxW=colW*2+pad*2,boxH=3*rowH+pad*2;
+  const boxW=colW*2+pad*2,boxH=rowsL.length*rowH+pad*2;
   const boxX=offX+(-61-WMIN)*S,boxY=proj(0,ZMIN+0.3)[1]+6-boxH;
   stx.fillStyle="rgba(255,255,255,0.94)";
   stx.beginPath();
@@ -358,6 +363,7 @@ function rebuildStatic(){
   stx.strokeStyle="#c9c8c2";stx.lineWidth=0.8;stx.stroke();
   stx.font="8px system-ui,sans-serif";
   rowsL.forEach((pair,r)=>pair.forEach((role,c)=>{
+    if(!role)return;
     const x=boxX+pad+c*colW,y=boxY+pad+rowH*r+rowH-5;
     drawMarker(stx,role,x+5,y);
     stx.fillStyle=INK2;stx.textAlign="left";
@@ -378,7 +384,7 @@ function rebuildStatic(){
 function drawMarker(g,role,x,y){
   g.save();
   if(role==="carried"){g.fillStyle="#a9784a";g.strokeStyle=INK;g.lineWidth=0.6;g.fillRect(x-3,y-3,6,6);g.strokeRect(x-3,y-3,6,6);g.restore();return;}
-  const r=ROLE[role];g.fillStyle=r.c;g.strokeStyle="white";g.lineWidth=0.8;
+  const r=ROLE[role]||{c:"#8a8984",mk:"o",ms:6};g.fillStyle=r.c;g.strokeStyle="white";g.lineWidth=0.8;
   const s=4+r.ms;
   g.beginPath();
   if(r.mk==="o")g.arc(x,y,Math.min(6,s/2),0,7);
@@ -501,7 +507,7 @@ function drawQ(sx,t){
   g.clearRect(0,0,W,H);
   g.font="700 10px system-ui";g.fillStyle=INK;g.textAlign="left";g.fillText("Waiting in line (requests / trucks)",4,10);
   const PAD=20,bh=13,T=LOG.series.map(r=>r.t),xw=Math.max(1,T[T.length-1]||1);
-  const raw=Math.max(1,...LOG.series.map(r=>Math.max(r.q_forklift,r.q_stacker,r.q_picker,r.q_checker,r.q_loader,r.gate)))*1.15+0.5;
+  const raw=Math.max(1,...LOG.series.map(r=>Math.max(r.q_operator||0,r.q_forklift||0,r.q_stacker||0,r.q_picker||0,r.q_checker||0,r.q_loader||0,r.gate||0)))*1.15+0.5;
   const ystep=raw>45?10:5,yn=Math.ceil(raw/ystep)*ystep;
   const X=v=>PAD+(v/xw)*(W-PAD-8),Y=v=>H-bh-(v/yn)*(H-bh-8);
   // y gridlines + tick labels (reference has them)
@@ -520,21 +526,24 @@ function drawQ(sx,t){
     g.textAlign="center";
   }
   const k=clamp(sx+1,0,LOG.series.length);
-  const lines=[["q_forklift",ROLE.forklift.c],["q_stacker",ROLE.stacker.c],["q_picker",ROLE.picker.c],
+  const lines=[["q_operator",ROLE.operator.c],["q_forklift",ROLE.forklift.c],["q_stacker",ROLE.stacker.c],["q_picker",ROLE.picker.c],
                ["q_checker",ROLE.checker.c],["q_loader",ROLE.loader.c],["gate",INK]];
   for(const[key,col]of lines){
     g.strokeStyle=col;g.lineWidth=1.3;
     if(key==="gate")g.setLineDash([3,2]);else g.setLineDash([]);
-    g.beginPath();
-    for(let i=0;i<k;i++){const v=LOG.series[i][key];if(i)g.lineTo(X(T[i]),Y(v));else g.moveTo(X(T[i]),Y(v));}
+    g.beginPath();let on=false;
+    for(let i=0;i<k;i++){const v=LOG.series[i][key];
+      if(typeof v!=="number"){on=false;continue;}   // series key absent in legacy logs
+      if(on)g.lineTo(X(T[i]),Y(v));else{g.moveTo(X(T[i]),Y(v));on=true;}}
     g.stroke();
   }
   g.setLineDash([]);
   g.strokeStyle=INK2;g.lineWidth=0.8;g.beginPath();g.moveTo(X(t),H-bh);g.lineTo(X(t),28);g.stroke();
-  // legend 3 cols x 2 rows, inside top of plot (reference layout: row1 forklift/stacker/picker, row2 checker/loader/gate)
+  // legend 3 per row, inside top of plot
   g.font="8px system-ui";g.textAlign="left";
-  for(let r=0;r<2;r++)for(let c=0;c<3;c++){
-    const[key,col]=lines[r*3+c];
+  for(let r=0;r<Math.ceil(lines.length/3);r++)for(let c=0;c<3;c++){
+    const entry=lines[r*3+c];if(!entry)continue;
+    const[key,col]=entry;
     const lab=key==="gate"?"gate":key.slice(2);
     const x=PAD+28+c*118,y=26+r*11;
     g.fillStyle=col;g.fillRect(x,y-3,10,2.5);
@@ -545,12 +554,13 @@ function drawU(s,t){
   const[g,W,H]=fitCanvas(uC,118);
   g.clearRect(0,0,W,H);
   g.font="700 10px system-ui";g.fillStyle=INK;g.textAlign="left";g.fillText("Utilisation so far",4,10);
-  const x0=64,barW=Math.max(30,W-x0-40),el=Math.max(t,60);
-  ROLE_ORDER.forEach((r,i)=>{
-    const y=22+i*(H-26)/4.6,n=cfg[ROLE_N[r]],u=Math.min(100,100*(s.busy[r]||0)/(n*el));
+  const x0=64,barW=Math.max(30,W-x0-40),el=Math.max(t,60),rows=UROLE&&UROLE.length?UROLE:ROLE_ORDER;
+  const step=(H-26)/Math.max(rows.length-1,1);
+  rows.forEach((r,i)=>{
+    const y=22+i*step,n=cfg[ROLE_N[r]]||1,u=Math.min(100,100*(s.busy[r]||0)/(n*el));
     g.fillStyle=GRID;g.fillRect(x0,y-4.5,barW,9);
     g.fillStyle=ROLE[r].c;g.fillRect(x0,y-4.5,barW*u/100,9);
-    g.fillStyle=MUTED;g.font="9px system-ui";g.textAlign="left";g.fillText(r+" ("+n+")",4,y+3);
+    g.fillStyle=MUTED;g.font="9px system-ui";g.textAlign="left";g.fillText(r+" ("+(cfg[ROLE_N[r]]||"?")+")",4,y+3);
     g.fillStyle=INK;g.fillText(Math.round(u)+"%",x0+barW+3,y+3);
   });
 }
@@ -559,7 +569,8 @@ function drawU(s,t){
 const CFG=[
  ["Staf &amp; peralatan",[
   ["n_pickers","Picker",1,8],["n_checkers","Checker",1,8],["n_loaders","Pemuat (loader)",1,12],
-  ["n_forklifts","Forklift",1,6],["n_stackers","Stacker (reach truck)",1,6],
+  ["n_operators","Operator (pengemudi)",1,4],["n_forklifts","Forklift",1,6],
+  ["n_stackers","Reach truck (stacker)",1,6],
   ["dock_doors","Gerbang aktif (dari 7)",1,7]]],
  ["Muat / bongkar per pallet (detik)",[
   ["t_load_pallet","Memuat",5,900],["t_unload_pallet","Membongkar",5,900]]],

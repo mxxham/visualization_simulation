@@ -36,6 +36,8 @@ ROLE_COLOR = {
     "checker": "#6250d6",
     "forklift": "#eda100",
     "stacker": "#e87ba4",
+    "reach": "#e87ba4",
+    "operator": "#d14330",
 }
 ROLE_MARKER = {
     "picker": "o",
@@ -43,8 +45,18 @@ ROLE_MARKER = {
     "checker": "D",
     "forklift": "s",
     "stacker": "^",
+    "reach": "^",
+    "operator": "o",
 }
-ROLE_SIZE = {"picker": 7, "loader": 6, "checker": 6, "forklift": 11, "stacker": 8}
+ROLE_SIZE = {
+    "picker": 7,
+    "loader": 6,
+    "checker": 6,
+    "forklift": 11,
+    "stacker": 8,
+    "reach": 8,
+    "operator": 7,
+}
 IN_COLOR, OUT_COLOR = "#2a78d6", "#eb6834"  # inbound / outbound trucks
 BIN_EMPTY, BIN_FULL, BIN_PART, BIN_RESV = (
     (216, 218, 219),
@@ -58,10 +70,12 @@ ROLE_N = {
     "picker": "n_pickers",
     "checker": "n_checkers",
     "stacker": "n_stackers",
+    "reach": "n_stackers",
+    "operator": "n_operators",
     "forklift": "n_forklifts",
     "loader": "n_loaders",
 }
-ROLE_ORDER = ["picker", "checker", "loader", "forklift", "stacker"]
+ROLE_ORDER = ["picker", "checker", "loader", "operator", "forklift", "reach", "stacker"]
 
 
 def hhmm(t0, t):
@@ -411,7 +425,7 @@ class Renderer:
                     color=ROLE_COLOR[role],
                     mec="white",
                     ls="",
-                    label=f"{role} ({self.cfg[ROLE_N[role]]})",
+                    label=f"{role} ({self.cfg.get(ROLE_N[role], '?')})",
                 )
             )
         hs.append(
@@ -568,6 +582,7 @@ class Renderer:
             pad=3,
         )
         self.qkeys = [
+            ("q_operator", "operator", ROLE_COLOR["operator"]),
             ("q_forklift", "forklift", ROLE_COLOR["forklift"]),
             ("q_stacker", "stacker", ROLE_COLOR["stacker"]),
             ("q_picker", "picker", ROLE_COLOR["picker"]),
@@ -580,7 +595,7 @@ class Renderer:
         ymax = 1
         self.qlines = []
         for key, lab, col in self.qkeys:
-            y = np.array([s[key] for s in self.series])
+            y = np.array([s.get(key, 0) for s in self.series])
             ymax = max(ymax, y.max())
             (ln,) = self.axq.plot(
                 [],
@@ -618,6 +633,7 @@ class Renderer:
             "Utilisation so far", fontsize=7.5, loc="left", color=INK, pad=3, x=-0.13
         )
         self.urole = ROLE_ORDER
+        self.urole = [r for r in self.urole if r in set(self.roles.values())]
         self.ubar = self.axu.barh(
             range(len(self.urole)),
             [0] * len(self.urole),
@@ -626,7 +642,7 @@ class Renderer:
         )
         self.axu.set_yticks(range(len(self.urole)))
         self.axu.set_yticklabels(
-            [f"{r} ({self.cfg[ROLE_N[r]]})" for r in self.urole],
+            [f"{r} ({self.cfg.get(ROLE_N[r], '?')})" for r in self.urole],
             fontsize=6.2,
             color=INK2,
         )
@@ -835,8 +851,8 @@ class Renderer:
         # utilisation
         el = max(t, 60.0)
         for i, role in enumerate(self.urole):
-            n = self.cfg[ROLE_N[role]]
-            u = 100 * s["busy"][role] / (n * el)
+            n = self.cfg.get(ROLE_N[role]) or 1
+            u = 100 * s["busy"].get(role, 0) / (n * el)
             u = min(100.0, u)
             self.ubar[i].set_width(u)
             self.utxt[i].set_x(u + 1.2)
@@ -971,6 +987,7 @@ def dashboard(log, kpis, path):
     ax.grid(axis="y", color=GRID, lw=0.6)
     ax.grid(axis="x", visible=False)
     for key, lab, col in [
+        ("q_operator", "operator", ROLE_COLOR["operator"]),
         ("q_forklift", "forklift", ROLE_COLOR["forklift"]),
         ("q_stacker", "stacker", ROLE_COLOR["stacker"]),
         ("q_picker", "picker", ROLE_COLOR["picker"]),
@@ -978,6 +995,8 @@ def dashboard(log, kpis, path):
         ("q_loader", "loader", ROLE_COLOR["loader"]),
         ("gate", "trucks at gate", INK),
     ]:
+        if key not in series[0]:
+            continue  # legacy logs have no operator queue
         y = np.array([s[key] for s in series])
         ax.plot(
             T, y, color=col, lw=1.6, label=lab, ls="-" if key != "gate" else (0, (3, 2))
@@ -988,20 +1007,21 @@ def dashboard(log, kpis, path):
     # 3 utilisation + waits
     ax = axs[0, 2]
     clean(ax, "Utilisation (bar) and average wait for a free resource")
-    roles = ROLE_ORDER
+    roles = [r for r in ROLE_ORDER if r in kpis["utilisation_pct"]]
     util = [kpis["utilisation_pct"][r] for r in roles]
     ax.barh(range(len(roles)), util, color=[ROLE_COLOR[r] for r in roles], height=0.6)
     for i, r in enumerate(roles):
         ax.text(
             util[i] + 0.8,
             i,
-            f"{util[i]:.0f}%   wait avg {kpis['avg_wait_min'][r]:.1f} / p90 {kpis['p90_wait_min'][r]:.1f} min",
+            f"{util[i]:.0f}%   wait avg {kpis['avg_wait_min'].get(r, 0):.1f}"
+            f" / p90 {kpis['p90_wait_min'].get(r, 0):.1f} min",
             va="center",
             fontsize=8.5,
             color=INK2,
         )
     ax.set_yticks(range(len(roles)))
-    ax.set_yticklabels([f"{r} ({cfg[ROLE_N[r]]})" for r in roles], fontsize=9)
+    ax.set_yticklabels([f"{r} ({cfg.get(ROLE_N[r], '?')})" for r in roles], fontsize=9)
     ax.invert_yaxis()
     ax.set_xlim(0, max(60, max(util) * 2.6))
     ax.set_xlabel("% of the simulated day busy")

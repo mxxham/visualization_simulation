@@ -103,6 +103,32 @@ A–E bertumpuk.
 Error JS apa pun ditampilkan sebagai banner merah di kiri-bawah — bila muncul,
 salin teksnya (otomatis terkirim ke log server).
 
+## Log baru — `breaks` & `vehicle_segs`
+
+`sim_log.json` dapat mengandung dua kunci opsional (ditambahkan oleh `wms_sim.py` versi baru):
+
+- **`breaks`** — array `[agent, role, start, end]` detik sejak tengah malam (basis waktu sama dengan `meta.t0` + sim-seconds). Contoh: `["op1", "operator", 13350.0, 18000.0]` → istirahat 11:45–13:00.
+- **`vehicle_segs`** — objek `{truck_id: [[start, end, agent, desc], ...]}` merekam segmen di mana forklift/loader melayani truk tertentu.
+- **Role baru** — log versi baru memakai role `operator` (op1/op2, pengemudi kendaraan) dan `reach` (pengganti nama role `stacker`); `meta.config` kini punya `n_operators`, dan deret waktu punya `q_operator` (antrean permintaan operator). Dashboard & viewer menoleransi log lama (role `stacker` tetap digambar jika ada).
+
+Viewer **toleran** — jika kunci tidak ada (log lama), fitur istirahat diam-diam dinonaktifkan tanpa error.
+
+## Staff mini-timeline
+
+Di panel **Pegawai & peralatan** kini muncul *staff timeline* permanen per baris staf:
+
+- **Track abu-abu** = span *duty* (awal–akhir segmen `agents[name].segs`).
+- **Biru** = *busy* (segmen non-walk/idle dari `agents[name].segs`).
+- **Merah garis putus-putus (hatched)** = *istirahat* dari `breaks`.
+- **Kuning** = segmen truk dari `vehicle_segs` (forklift/loader yang sedang muat/bongkar).
+- **Tooltip** di setiap bar: label + jam `HH:MM` (konversi `meta.t0` + detik simulasi).
+- **Legenda** di bawah track menjelaskan warna.
+
+### Indikator “on break”
+
+- Saat playhead berada di dalam jendela istirahat seorang agent, nama di track mendapat kelas `.onbreak` (teks berwarna oranye `--warn`).
+- Tooltip kursor di peta 3D juga menambahkan baris “(istirahat)” bila agent sedang istirahat.
+
 ## Data
 
 - `data/bins.csv`, `data/items.csv`, `data/stock.csv` diekstrak dari
