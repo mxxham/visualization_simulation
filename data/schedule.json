@@ -1,0 +1,310 @@
+{
+ "source": "Warehouse Management System_16 Oktober 2026_.xlsx",
+ "sheet": "Schedule of the day",
+ "generated": "2026-10-20 10:46",
+ "n_shipments": 11,
+ "cartons": 4426,
+ "est_pallets": 124,
+ "skipped": [
+  [
+   "109724636",
+   "550070615",
+   9
+  ],
+  [
+   "109724636",
+   "550072298",
+   2
+  ],
+  [
+   "109721544",
+   "550027044",
+   20
+  ],
+  [
+   "109722446",
+   "550044635",
+   14
+  ],
+  [
+   "109722446",
+   "550044635",
+   6
+  ]
+ ],
+ "shipments": [
+  {
+   "sid": "109724833",
+   "order": "539097847",
+   "po": "B2CI\u2013MSB-MARGO-JATIM-OCT2-2026",
+   "customer": "CV MULTI SARANA BAN",
+   "city": "SURABAYA",
+   "truck_type": "WBX",
+   "slot": "08:00",
+   "no": 1,
+   "due": "2026-10-22",
+   "lines": [
+    [
+     "550062464",
+     1198
+    ]
+   ],
+   "cartons": 1198,
+   "est_pallets": 25
+  },
+  {
+   "sid": "109724636",
+   "order": "539059629",
+   "po": "",
+   "customer": "PT CHRYSANTA ARTHA PRATAMA",
+   "city": "GRESIK",
+   "truck_type": "TRAGA",
+   "slot": "08:30",
+   "no": 2,
+   "due": "2026-10-08",
+   "lines": [
+    [
+     "550069888",
+     54
+    ]
+   ],
+   "cartons": 54,
+   "est_pallets": 2
+  },
+  {
+   "sid": "109724839",
+   "order": "539109883",
+   "po": "5402198498",
+   "customer": "PT ASTRA INTERNATIONAL TBK",
+   "city": "SURABAYA",
+   "truck_type": "GRM",
+   "slot": "09:00",
+   "no": 3,
+   "due": "2026-10-22",
+   "lines": [
+    [
+     "550056224",
+     3
+    ],
+    [
+     "550056228",
+     1
+    ]
+   ],
+   "cartons": 4,
+   "est_pallets": 2
+  },
+  {
+   "sid": "109721544",
+   "order": "538765181",
+   "po": "",
+   "customer": "PT SEFAS PELINDOTAMA",
+   "city": "SURABAYA",
+   "truck_type": "WBX",
+   "slot": "09:30",
+   "no": 3,
+   "due": "2026-10-14",
+   "lines": [
+    [
+     "550025669",
+     34
+    ],
+    [
+     "550024953",
+     2
+    ],
+    [
+     "550024921",
+     4
+    ],
+    [
+     "550025055",
+     2
+    ],
+    [
+     "550045080",
+     5
+    ],
+    [
+     "550024955",
+     36
+    ],
+    [
+     "550045079",
+     3
+    ]
+   ],
+   "cartons": 86,
+   "est_pallets": 17
+  },
+  {
+   "sid": "109724832",
+   "order": "539060367",
+   "po": "",
+   "customer": "PT. SUMBER BARU BAN",
+   "city": "MALANG",
+   "truck_type": "CDD",
+   "slot": "10:00",
+   "no": 4,
+   "due": "2026-10-16",
+   "lines": [
+    [
+     "550044709",
+     300
+    ],
+    [
+     "550074326",
+     140
+    ]
+   ],
+   "cartons": 440,
+   "est_pallets": 10
+  },
+  {
+   "sid": "109724635",
+   "order": "539059830",
+   "po": "",
+   "customer": "PT CHRYSANTA ARTHA PRATAMA",
+   "city": "BLITAR",
+   "truck_type": "CDE",
+   "slot": "10:30",
+   "no": 5,
+   "due": "2026-10-08",
+   "lines": [
+    [
+     "550069888",
+     123
+    ]
+   ],
+   "cartons": 123,
+   "est_pallets": 4
+  },
+  {
+   "sid": "109722446",
+   "order": "538967050",
+   "po": "11526100023",
+   "customer": "PT. ADI SURYA ARKANA",
+   "city": "KOTA MATARAM",
+   "truck_type": "C20",
+   "slot": "11:00",
+   "no": 9,
+   "due": "2026-10-15",
+   "lines": [
+    [
+     "550044709",
+     508
+    ],
+    [
+     "550038021",
+     222
+    ],
+    [
+     "550047028",
+     7
+    ],
+    [
+     "550072331",
+     42
+    ],
+    [
+     "550044625",
+     62
+    ]
+   ],
+   "cartons": 841,
+   "est_pallets": 23
+  },
+  {
+   "sid": "109721548",
+   "order": "539015859",
+   "po": "",
+   "customer": "PT CHRYSANTA ARTHA PRATAMA",
+   "city": "MALANG",
+   "truck_type": "CDD",
+   "slot": "13:30",
+   "no": 14,
+   "due": "2026-10-08",
+   "lines": [
+    [
+     "550037752",
+     5
+    ],
+    [
+     "550044625",
+     34
+    ],
+    [
+     "550069888",
+     197
+    ]
+   ],
+   "cartons": 236,
+   "est_pallets": 8
+  },
+  {
+   "sid": "109724637",
+   "order": "539025806",
+   "po": "kdr 11026",
+   "customer": "PT. SUMBER BARU BAN",
+   "city": "KEDIRI",
+   "truck_type": "WBX",
+   "slot": "14:00",
+   "no": 6,
+   "due": "2026-10-05",
+   "lines": [
+    [
+     "550044709",
+     890
+    ],
+    [
+     "550074326",
+     362
+    ]
+   ],
+   "cartons": 1252,
+   "est_pallets": 27
+  },
+  {
+   "sid": "109721720",
+   "order": "539054525",
+   "po": "SC/PN/29/09/26",
+   "customer": "PT CHRYSANTA ARTHA PRATAMA",
+   "city": "PONOROGO",
+   "truck_type": "CDE",
+   "slot": "14:30",
+   "no": 13,
+   "due": "2026-10-08",
+   "lines": [
+    [
+     "550044625",
+     72
+    ],
+    [
+     "550069888",
+     61
+    ]
+   ],
+   "cartons": 133,
+   "est_pallets": 4
+  },
+  {
+   "sid": "109721722",
+   "order": "539054537",
+   "po": "",
+   "customer": "PT CHRYSANTA ARTHA PRATAMA",
+   "city": "BANYUWANGI",
+   "truck_type": "TRAGA",
+   "slot": "15:00",
+   "no": 10,
+   "due": "2026-10-09",
+   "lines": [
+    [
+     "550044625",
+     59
+    ]
+   ],
+   "cartons": 59,
+   "est_pallets": 2
+  }
+ ]
+}

@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CKB WSM SUB 2 · Dashboard</title>
+<style>
+:root{--ink:#0b0b0b;--ink2:#52514e;--mut:#8a8984;--grid:#e3e2de;--surface:#fcfcfb;--floor:#f1f0ec;--in:#2a78d6;--out:#eb6834}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--surface);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;align-items:center;gap:14px;padding:6px 14px;border-bottom:1px solid var(--grid);flex:0 0 auto}
+header h1{font-size:14px;margin:0;font-weight:700}
+header a{color:var(--ink2);text-decoration:none;font-size:12px;border:1px solid var(--grid);border-radius:6px;padding:3px 8px}
+header a:hover{color:var(--ink)}
+.runsel{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:12px}
+select{font:inherit;color:var(--ink);border:1px solid var(--grid);border-radius:6px;padding:3px 6px;background:#fff}
+#loadmsg{color:var(--mut);font-size:11.5px}
+#mapwrap{flex:1 1 62%;min-height:120px;overflow:hidden}
+#map{width:100%;height:100%;display:block}
+#hud{flex:0 0 auto;display:grid;grid-template-columns:27% 39% 34%;gap:0 10px;padding:8px 14px 10px;border-top:1px solid var(--grid)}
+#hud .col{min-width:0}
+#hud .ttl{font-weight:700;font-size:13.5px}
+.clockrow{display:flex;align-items:baseline;gap:12px;margin:2px 0 6px}
+.clock{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.status{color:var(--mut);font-size:11px}
+.counters{font-size:11.5px;line-height:1.55;color:var(--ink);margin:0;white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace}
+.feedh{font-weight:700;font-size:11.5px;margin:8px 0 3px}
+.feed{font-size:10.5px;line-height:1.34;color:var(--ink2);white-space:pre-wrap;margin:0;min-height:98px}
+.tblh{font-weight:700;font-size:12.5px;margin-bottom:3px}
+.colh{font-size:10.5px;color:var(--mut);font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre}
+#trows{font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre;line-height:1.72}
+#trows .row{display:flex;align-items:center}
+.dot{width:9px;height:9px;flex:0 0 9px;margin-right:5px;display:inline-block}
+.row.done{color:var(--mut)}
+.row.active{font-weight:700}
+#right{display:flex;flex-direction:column;gap:6px}
+#qchart,#ubars{width:100%;display:block}
+#ctrl{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--grid);background:#f6f5f2}
+#play{font:inherit;font-weight:600;border:1px solid var(--grid);border-radius:8px;background:#fff;padding:4px 14px;cursor:pointer}
+#play:hover{border-color:var(--mut)}
+.speeds{display:flex;gap:4px}
+.speeds button{font:inherit;font-size:11.5px;border:1px solid var(--grid);background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;color:var(--mut)}
+.speeds button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+#scrub{flex:1;accent-color:var(--ink2)}
+#tlabel{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+#cfgbtn{font:inherit;font-size:12px;border:1px solid var(--grid);border-radius:8px;background:#fff;padding:3px 10px;cursor:pointer}
+#cfgbtn:hover{border-color:var(--mut)}
+#cfgbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+#cfgdrawer{position:fixed;top:0;right:0;bottom:0;width:342px;background:#fff;border-left:1px solid var(--grid);
+  box-shadow:-8px 0 24px rgba(0,0,0,.07);z-index:40;transform:translateX(102%);transition:transform .22s ease;
+  display:flex;flex-direction:column}
+#cfgdrawer.open{transform:none}
+#cfgdrawer .hd{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--grid);font-weight:700;font-size:13px}
+#cfgdrawer .hd button{border:0;background:none;font-size:16px;cursor:pointer;color:var(--mut)}
+#cfgbody{overflow-y:auto;padding:10px 14px 16px;flex:1}
+#cfgbody h4{margin:10px 0 4px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+#cfgbody .frow{display:flex;align-items:center;gap:6px;margin:3px 0}
+#cfgbody label{flex:1;font-size:12px;color:var(--ink2);display:block;padding-right:4px}
+#cfgbody input{width:76px;font:inherit;font-size:12px;border:1px solid var(--grid);border-radius:6px;padding:2px 6px;text-align:right}
+#cfgbody .hint{font-size:9.5px;color:var(--mut);display:block}
+#cfgfoot{border-top:1px solid var(--grid);padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+#cfgfoot .name{display:flex;gap:6px;align-items:center}
+#cfgfoot .name label{font-size:12px;color:var(--ink2)}
+#cfgfoot .name input{flex:1;font:inherit;font-size:12px;border:1px solid var(--grid);border-radius:6px;padding:3px 8px}
+#runbtn{font:inherit;font-weight:600;border:1px solid var(--grid);border-radius:8px;background:var(--ink);color:#fff;padding:6px 10px;cursor:pointer}
+#runbtn:disabled{opacity:.55;cursor:default}
+#cfgstatus{font-size:11px;color:var(--mut);min-height:14px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>CKB WSM SUB 2 · Dashboard</h1>
+  <div class="runsel"><span>Hasil</span><select id="runsel"></select></div>
+  <a href="viewer.html">↩ Tampilan 3D</a>
+  <span id="loadmsg"></span>
+</header>
+
+<section id="mapwrap"><canvas id="map"></canvas></section>
+
+<section id="hud">
+  <div class="col">
+    <div class="ttl">CKB WSM SUB&nbsp;2 - warehouse simulation</div>
+    <div class="clockrow"><span class="clock" id="clock">--:--</span>
+      <span class="status" id="subtime">simulated time | day start --:--</span></div>
+    <pre class="counters" id="counters"></pre>
+    <div class="feedh">Latest events</div>
+    <pre class="feed" id="feed"></pre>
+  </div>
+  <div class="col">
+    <div class="tblh">Trucks (plan vs reality)</div>
+    <div class="colh" id="tsum"></div>
+    <div class="colh">truck  type  plan   actual  vs plan   status</div>
+    <div id="trows"></div>
+  </div>
+  <div class="col" id="right">
+    <canvas id="qchart" height="150"></canvas>
+    <canvas id="ubars" height="118"></canvas>
+  </div>
+</section>
+
+<section id="ctrl">
+  <button id="play">▶ Putar</button>
+  <div class="speeds" id="speeds">
+    <button data-s="1">1×</button><button data-s="4">4×</button>
+    <button data-s="16" class="on">16×</button><button data-s="64">64×</button>
+    <button data-s="240">240×</button>
+  </div>
+  <input type="range" id="scrub" min="0" max="1" step="0.0001" value="0">
+  <span id="tlabel">--:--</span>
+  <button id="cfgbtn">⚙ Konfigurasi</button>
+</section>
+
+<aside id="cfgdrawer">
+  <div class="hd">Konfigurasi &amp; simulasi baru <button id="cfgclose">✕</button></div>
+  <div id="cfgbody"></div>
+  <div id="cfgfoot">
+    <div class="name"><label>Nama run</label><input id="runname" spellcheck="false"></div>
+    <button id="runbtn">▶ Jalankan simulasi</button>
+    <div id="cfgstatus"></div>
+  </div>
+</aside>
+
+<script>
+"use strict";
+// ---------- palette / constants (mirrors visualize.py) ----------
+const INK="#0b0b0b",INK2="#52514e",MUTED="#8a8984",GRID="#e3e2de",FLOOR="#f1f0ec";
+const ROLE={picker:{c:"#2a78d6",mk:"o",ms:7},checker:{c:"#6250d6",mk:"D",ms:6},
+            loader:{c:"#1baf7a",mk:"s",ms:6},forklift:{c:"#eda100",mk:"s",ms:11},
+            stacker:{c:"#e87ba4",mk:"^",ms:8}};
+const ROLE_ORDER=["picker","checker","loader","forklift","stacker"];
+const ROLE_N={picker:"n_pickers",checker:"n_checkers",loader:"n_loaders",forklift:"n_forklifts",stacker:"n_stackers"};
+const IN_COLOR="#2a78d6",OUT_COLOR="#eb6834";
+const BIN_EMPTY="#d8dadb",BIN_FULL="#1f6f8b",BIN_PART="#7fb8cf",BIN_RESV="#e0a526";
+const FLASH={1:"#d14330",3:"#8e5bc7"},FLASH_S=45.0;
+const X0=-0.3,Z0=-1.5,X1=54.3,Z1=29.5,RES=0.0715;
+const WMIN=-62,WMAX=66,ZMIN=-6,ZMAX=33;
+
+const $=id=>document.getElementById(id);
+const mapC=$("map"),qC=$("qchart"),uC=$("ubars");
+const mmx=mapC.getContext("2d");
+const rastC=document.createElement("canvas"),rax=rastC.getContext("2d");
+const staticC=document.createElement("canvas"),stx=staticC.getContext("2d");
+
+let LOG=null,cfg=null,t0=0,endT=0,doorsArr=[],pitch=5.6,recvX=0,recvZ0=0,recvDZ=0,recvSpots=0,nLanes=0;
+let bins=[];
+let frac=[],resv=[],flashUntil={},flashCol={};
+let laneState={},recvState={};
+let bptr=0,lptr=0,rptr=0,nptr=0;
+let tracks={},agents={},trucks={};
+let simT=0,nowShown=-1,playing=false,speed=16,lastTs=0;
+let curRun="default";
+let trow={};
+
+function hhmm(t){const s=Math.floor(t0+t);
+  return String(Math.floor(s/3600)%24).padStart(2,"0")+":"+String(Math.floor(s/60)%60).padStart(2,"0");}
+function fmtSigned(v){return (v>=0?"+":"")+v;}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function bisect(arr,x){let lo=0,hi=arr.length;while(lo<hi){const m=(lo+hi)>>1;if(arr[m]<=x)lo=m+1;else hi=m;}return lo;}
+const LANES_Z=i=>(i+2)*1.4;
+
+// ---------- run loading ----------
+async function loadRun(run){
+  curRun=run;
+  $("loadmsg").textContent="memuat "+run+" …";
+  const r=await fetch("/out/"+encodeURIComponent(run)+"/sim_log.json");
+  const log=await r.json();
+  LOG=log;cfg=log.meta.config;t0=log.meta.t0;endT=log.meta.end;doorsArr=log.meta.doors;
+  pitch=log.meta.pitch;recvX=log.meta.recv[0];recvZ0=log.meta.recv[1];recvDZ=log.meta.recv[2];
+  recvSpots=log.meta.recv_spots||16;nLanes=log.meta.lanes||8;
+  bins=log.bins;
+  frac=log.initial_state.slice();resv=new Array(bins.length).fill(0);
+  flashUntil={};flashCol={};laneState={};recvState={};bptr=lptr=rptr=nptr=0;
+  tracks={};agents=log.agents;
+  for(const[n,a]of Object.entries(agents)){
+    tracks[n]={segs:a.segs,home:a.home,
+      t0s:a.segs.map(s=>s[0]),
+      cum:a.segs.map(s=>{const pts=s[2],c=[0];
+        for(let i=1;i<pts.length;i++)c.push(c[i-1]+Math.abs(pts[i][0]-pts[i-1][0])+Math.abs(pts[i][1]-pts[i-1][1]));return c;})};
+  }
+  trucks=log.trucks;
+  simT=0;$("tlabel").textContent=hhmm(0);
+  buildRows();
+  paintAllRaster();
+  rebuildStatic();
+  setPlay(false);
+  nowShown=-1;renderFrame(0);
+  const tp=log.meta.truck_plan||{};
+  const ntIn=tp.inbound!==undefined?tp.inbound:Object.keys(trucks).filter(k=>trucks[k].kind==="IN").length;
+  const ntOut=tp.outbound!==undefined?tp.outbound:Object.keys(trucks).filter(k=>trucks[k].kind==="OUT").length;
+  $("loadmsg").textContent=Object.keys(trucks).length+" truk ("+ntIn+" masuk · "+ntOut+
+    " keluar) · berakhir "+hhmm(endT)+" · gerbang "+doorsArr.length;
+  buildCfg();
+  window.history.replaceState(null,"","?run="+encodeURIComponent(run));
+}
+function buildRows(){
+  const box=$("trows");box.innerHTML="";trow={};
+  for(const tid of Object.keys(trucks)){
+    const d=document.createElement("div");d.className="row";
+    const dot=document.createElement("span");dot.className="dot";
+    dot.style.background=trucks[tid].kind==="IN"?IN_COLOR:OUT_COLOR;
+    d.appendChild(dot);
+    const sp=document.createElement("span");d.appendChild(sp);
+    box.appendChild(d);trow[+tid]=sp;
+  }
+}
+
+// ---------- track interpolation (visualize.py Track.at) ----------
+function trackAt(trk,t){
+  const i=bisect(trk.t0s,t)-1;
+  if(i<0)return{x:trk.home[0],z:trk.home[1],dx:1,dz:0,carry:0,active:false};
+  const s=trk.segs[i],pts=s[2],carry=s[4],t0s=s[0],t1s=s[1];
+  if(t>=t1s){
+    let dx=0,dz=0;
+    if(pts.length>1){dx=pts[pts.length-1][0]-pts[pts.length-2][0];dz=pts[pts.length-1][1]-pts[pts.length-2][1];}
+    return{x:pts[pts.length-1][0],z:pts[pts.length-1][1],dx,dz,carry:0,active:false};
+  }
+  if(pts.length===1)return{x:pts[0][0],z:pts[0][1],dx:1,dz:0,carry,active:true};
+  const c=trk.cum[i],L=c[c.length-1]*(t-t0s)/(t1s-t0s);
+  const j=clamp(bisect(c,L),1,pts.length-1);
+  const seg=c[j]-c[j-1],f=seg>0?(L-c[j-1])/seg:1;
+  return{x:pts[j-1][0]+f*(pts[j][0]-pts[j-1][0]),z:pts[j-1][1]+f*(pts[j][1]-pts[j-1][1]),
+         dx:pts[j][0]-pts[j-1][0],dz:pts[j][1]-pts[j-1][1],carry,active:true};
+}
+
+// ---------- bin raster ----------
+function binColor(i,t){
+  const fu=flashUntil[i];
+  if(fu!==undefined&&t<fu)return FLASH[flashCol[i]];
+  if(frac[i]<=0)return BIN_EMPTY;         // order mirrors visualize.py: empty wins over reserved
+  if(resv[i])return BIN_RESV;
+  return frac[i]>=0.99?BIN_FULL:BIN_PART;
+}
+function paintBin(i,t){
+  const[,x,,z,,face,lv]=bins[i];        // [code,x,y,z,lane,face,lv,bay,pos]
+  const depth=LOG.meta.layout.rack_depth_m,strip=depth/5;
+  const zlo=face===0?z-depth/2+lv*strip:z+depth/2-(lv+1)*strip;
+  const xl=x-0.675,xr=x+0.675;
+  const c0=clamp(Math.floor((xl-X0)/RES)+1,0,rastC.width-1);
+  const c1=clamp(Math.floor((xr-X0)/RES),c0+1,rastC.width);
+  const r0=clamp(Math.floor((zlo-Z0)/RES)+1,0,rastC.height-1);
+  const r1=clamp(Math.floor((zlo+strip-Z0)/RES),r0+1,rastC.height);
+  rax.fillStyle=binColor(i,t);rax.fillRect(c0,r0,c1-c0,r1-r0);
+}
+function paintAllRaster(){
+  rastC.width=Math.round((X1-X0)/RES);rastC.height=Math.round((Z1-Z0)/RES);
+  rax.fillStyle="#f1f0ec";rax.fillRect(0,0,rastC.width,rastC.height);
+  for(let i=0;i<bins.length;i++)paintBin(i,nowShown<0?0:nowShown);
+}
+function advanceBins(t){                       // returns true if raster redrawn next composite
+  const ev=LOG.bin_ev;let changed=0;
+  while(bptr<ev.length&&ev[bptr][0]<=t){const[,i,fr,rs,fl]=ev[bptr];
+    frac[i]=fr;resv[i]=rs;
+    if(FLASH[fl]){flashUntil[i]=ev[bptr][0]+FLASH_S;flashCol[i]=fl;}
+    paintBin(i,t);changed++;bptr++;}
+  for(const k of Object.keys(flashUntil)){
+    if(flashUntil[k]<=t){delete flashUntil[k];paintBin(+k,t);changed++;}
+  }
+  return changed>0;
+}
+function advanceAux(t){
+  const le=LOG.lane_ev,re_=LOG.recv_ev;
+  while(lptr<le.length&&le[lptr][0]<=t){const[,lane,cnt,tr]=le[lptr];
+    if(cnt===-1)delete laneState[lane];else laneState[lane]=[cnt,tr];lptr++;}
+  while(rptr<re_.length&&re_[rptr][0]<=t){recvState[re_[rptr][1]]=re_[rptr][2];rptr++;}
+  while(nptr<LOG.notes.length&&LOG.notes[nptr][0]<=t)nptr++;
+}
+
+// ---------- world -> screen ----------
+let S=1,offX=0,offY=0,MW=10,MH=10,DPR=1;
+function proj(x,z){return[offX+(x-WMIN)*S,offY+(ZMAX-z)*S];}
+
+// keep canvas fitted to its live box (layout settles after fonts/rows load)
+let fitW=0,fitH=0;
+function refit(force){
+  const box=$("mapwrap").getBoundingClientRect();
+  const w=Math.round(box.width),h=Math.round(box.height);
+  if(!force&&Math.abs(w-fitW)<2&&Math.abs(h-fitH)<2)return;
+  fitW=w;fitH=h;
+  rebuildStatic();
+  if(LOG)renderFrame(simT);
+}
+if(window.ResizeObserver){
+  new ResizeObserver(()=>refit(false)).observe($("mapwrap"));
+}else window.addEventListener("resize",()=>refit(false));
+
+// ---------- static layer ----------
+function rebuildStatic(){
+  if(!cfg)return;
+  DPR=window.devicePixelRatio||1;
+  MW=Math.max(10,fitW||$("mapwrap").clientWidth);
+  MH=Math.max(10,fitH||$("mapwrap").clientHeight);
+  mapC.width=Math.round(MW*DPR);mapC.height=Math.round(MH*DPR);
+  S=Math.min(MW/(WMAX-WMIN),MH/(ZMAX-ZMIN));
+  offX=(MW-(WMAX-WMIN)*S)/2;
+  offY=Math.round((MH-(ZMAX-ZMIN)*S)/2);
+  staticC.width=mapC.width;staticC.height=mapC.height;
+  const g=stx;g.setTransform(DPR,0,0,DPR,0,0);
+  g.fillStyle=FLOOR;g.fillRect(0,0,MW,MH);
+  // raster baked into static layer (rastC drawn later on top for updates, so here it is just backdrop fill)
+  // dashed aisles + cross-aisles
+  g.strokeStyle="#e4e3dd";g.lineWidth=0.6;
+  const dash=(x1,z1,x2,z2)=>{g.beginPath();g.moveTo(...proj(x1,z1));g.lineTo(...proj(x2,z2));g.stroke();};
+  g.setLineDash([2,4]);
+  for(let k=0;k<7;k++){const zc=-pitch/2+pitch*k;dash(-2.5,zc,56.5,zc);}
+  g.setLineDash([]);dash(-2.5,-2.8,-2.5,30.8);dash(56.5,-2.8,56.5,30.8);
+  // west wall
+  g.strokeStyle="#b9b8b2";g.lineWidth=1.2;dash(-13.5,-4.5,-13.5,31.5);
+  // block labels
+  g.font="600 10px system-ui,sans-serif";g.fillStyle=INK2;g.textAlign="right";g.textBaseline="middle";
+  ["CA","CB","CC","CD","CE","CF"].forEach((n,i)=>{const px=offX+(-1.4-WMIN)*S,py=proj(0,i*pitch)[1];g.fillText(n,px,py);});
+  // map title
+  g.textAlign="center";g.font="7.5px system-ui";g.fillStyle=MUTED;g.textBaseline="alphabetic";
+  g.fillText("Racking CA-CF  |  5 levels per bay, level A (ground) on the aisle side of each strip  |  gates on the west wall (left), bays run east",
+             offX+(27-WMIN)*S,proj(0,31.8)[1]);
+  // gate pockets
+  doorsArr.forEach(([dx,dz],i)=>{
+    const act=i<cfg.dock_doors;
+    const x=offX+(dx-2.2-WMIN)*S,y=proj(0,dz+1.25)[1],w=2.7*S,h=2.5*S;
+    g.fillStyle=act?"#cfe7df":"#d6d5cf";g.fillRect(x,y,w,h);
+    g.strokeStyle=act?"#1baf7a":"#8a8984";g.lineWidth=0.8;g.strokeRect(x,y,w,h);
+    g.fillStyle=act?INK2:MUTED;g.textAlign="left";g.textBaseline="middle";
+    g.font=(act?"600 ":"")+"8px system-ui,sans-serif";
+    g.fillText("G"+(i+1),offX+(-13.2-WMIN)*S,proj(0,dz)[1]);
+  });
+  // staging lane boxes (white base; fills drawn per-frame)
+  for(let i=0;i<nLanes;i++){
+    const z=LANES_Z(i),x=offX+(-9.2-WMIN)*S,w=2.6*S,y=proj(0,z+0.6)[1],h=1.2*S;
+    g.fillStyle="#ffffff";g.fillRect(x,y,w,h);
+    g.strokeStyle="#8a8984";g.lineWidth=0.7;g.strokeRect(x,y,w,h);
+    g.fillStyle=MUTED;g.textAlign="left";g.font="6px system-ui";
+    g.fillText(String(i+1),offX+(-5.9-WMIN)*S,proj(0,z)[1]+2);
+  }
+  g.textAlign="left";g.textBaseline="alphabetic";g.fillStyle=INK2;g.font="7px system-ui";
+  g.fillText("OUTBOUND STAGING (STG_01-08)",offX+(-9.2-WMIN)*S,proj(0,1.4)[1]);
+  // receiving spots (base white)
+  for(let i=0;i<recvSpots;i++){
+    const z=recvZ0+recvDZ*i,x=offX+(-10.05-WMIN)*S,y=proj(0,z+0.45)[1],w=1.1*S,h=0.9*S;
+    g.fillStyle="#ffffff";g.fillRect(x,y,w,h);
+    g.strokeStyle="#b9b8b2";g.lineWidth=0.6;g.strokeRect(x,y,w,h);
+  }
+  g.fillStyle=INK2;g.font="7px system-ui";
+  g.fillText("RECEIVING AREA (16 spots)",offX+(-10.2-WMIN)*S,proj(0,29.7)[1]);
+  // yard captions
+  g.fillStyle=MUTED;
+  g.fillText("TRUCK YARD  |  "+doorsArr.length+" gates on the west wall, "+cfg.dock_doors+" active (green)",
+             offX+(-58.5-WMIN)*S,proj(0,30.6)[1]);
+  g.fillText("gate queue (trucks wait here for a free gate)",offX+(-58.5-WMIN)*S,proj(0,29.4)[1]);
+  // role legend bottom-left: white boxed, 2 columns x 3 rows (reference layout)
+  const rowsL=[["picker","forklift"],["checker","stacker"],["loader","carried"]];
+  const rowH=14,colW=104,pad=7;
+  const boxW=colW*2+pad*2,boxH=3*rowH+pad*2;
+  const boxX=offX+(-61-WMIN)*S,boxY=proj(0,ZMIN+0.3)[1]+6-boxH;
+  stx.fillStyle="rgba(255,255,255,0.94)";
+  stx.beginPath();
+  if(stx.roundRect)stx.roundRect(boxX,boxY,boxW,boxH,4);else stx.rect(boxX,boxY,boxW,boxH);
+  stx.fill();
+  stx.strokeStyle="#c9c8c2";stx.lineWidth=0.8;stx.stroke();
+  stx.font="8px system-ui,sans-serif";
+  rowsL.forEach((pair,r)=>pair.forEach((role,c)=>{
+    const x=boxX+pad+c*colW,y=boxY+pad+rowH*r+rowH-5;
+    drawMarker(stx,role,x+5,y);
+    stx.fillStyle=INK2;stx.textAlign="left";
+    stx.fillText(role==="carried"?"pallet / cartons carried":role+" ("+cfg[ROLE_N[role]]+")",x+14,y+3);
+  }));
+  // bin colour key top-right
+  const keyX=offX+(58.4-WMIN)*S,labX=offX+(60.4-WMIN)*S;
+  [["empty bin",BIN_EMPTY],["full pallet",BIN_FULL],["part pallet",BIN_PART],
+   ["allocated to an order",BIN_RESV],["hand pick (now)",FLASH[1]],
+   ["forklift in/out (now)",FLASH[3]]].forEach(([lab,c],k)=>{
+    const yTop=proj(0,28.2-k*1.9+0.55)[1];
+    g.fillStyle=c;g.fillRect(keyX,yTop,1.4*S,1.1*S);
+    g.strokeStyle=INK2;g.lineWidth=0.4;g.strokeRect(keyX,yTop,1.4*S,1.1*S);
+    g.fillStyle=INK2;g.font="7.5px system-ui";g.textAlign="left";g.textBaseline="middle";
+    g.fillText(lab,labX,yTop+1.1*S/2);
+  });
+}
+function drawMarker(g,role,x,y){
+  g.save();
+  if(role==="carried"){g.fillStyle="#a9784a";g.strokeStyle=INK;g.lineWidth=0.6;g.fillRect(x-3,y-3,6,6);g.strokeRect(x-3,y-3,6,6);g.restore();return;}
+  const r=ROLE[role];g.fillStyle=r.c;g.strokeStyle="white";g.lineWidth=0.8;
+  const s=4+r.ms;
+  g.beginPath();
+  if(r.mk==="o")g.arc(x,y,Math.min(6,s/2),0,7);
+  else if(r.mk==="D"){g.moveTo(x,y-s/2);g.lineTo(x+s/2,y);g.lineTo(x,y+s/2);g.lineTo(x-s/2,y);g.closePath();}
+  else if(r.mk==="s"){g.rect(x-s*0.3,y-s*0.3,s*0.6,s*0.6);}
+  else{g.moveTo(x,y-s/2);g.lineTo(x+s/2,y+s/2);g.lineTo(x-s/2,y+s/2);g.closePath();}
+  g.fill();g.stroke();g.restore();
+}
+
+// ---------- frame ----------
+function renderFrame(t){
+  if(!LOG)return;
+  if(t<nowShown){nowShown=-1;paintAllRaster();bptr=lptr=rptr=nptr=0;
+    frac=LOG.initial_state.slice();resv=new Array(bins.length).fill(0);
+    flashUntil={};flashCol={};laneState={};recvState={};nptr=0;}
+  nowShown=t;
+  advanceBins(t);advanceAux(t);
+  const g=mmx;g.setTransform(DPR,0,0,DPR,0,0);
+  g.clearRect(0,0,MW,MH);
+  g.imageSmoothingEnabled=false;
+  // static furniture first (opaque), raster composited on top, dynamic fills last
+  g.drawImage(staticC,0,0,MW,MH);
+  const rx=proj(X0,Z1)[0],ry=proj(X0,Z1)[1];
+  g.drawImage(rastC,rx,ry,(X1-X0)*S,(Z1-Z0)*S);
+  // staging fills + counts
+  for(let i=0;i<nLanes;i++){
+    const z=LANES_Z(i),x=offX+(-9.2-WMIN)*S,w=2.6*S,y=proj(0,z+0.6)[1],h=1.2*S;
+    const st=laneState[i];
+    g.fillStyle=st?OUT_COLOR:"#ffffff";g.fillRect(x,y,w,h);
+    g.strokeStyle="#8a8984";g.lineWidth=0.7;g.strokeRect(x,y,w,h);
+    if(st){g.fillStyle="#fff";g.font="600 8px system-ui";g.textAlign="center";g.fillText(String(st[0]),x+w/2,y+h/2+3);}
+  }
+  // recv occupancy
+  for(let i=0;i<recvSpots;i++){
+    const z=recvZ0+recvDZ*i,x=offX+(-10.05-WMIN)*S,y=proj(0,z+0.45)[1],w=1.1*S,h=0.9*S;
+    g.fillStyle=recvState[i]?"#a9784a":"#ffffff";g.fillRect(x,y,w,h);
+    g.strokeStyle="#b9b8b2";g.lineWidth=0.6;g.strokeRect(x,y,w,h);
+  }
+  // trucks
+  const tids=Object.keys(trucks).map(Number).sort((a,b)=>a-b);
+  for(const tid of tids){
+    const tr=trucks[String(tid)],tk=tracks["T"+tid];
+    const states=tr.states||[];
+    const past=states.filter(s=>s[0]<=t);
+    const st=past.length?past[past.length-1][1]:(t<tr.arrival?"en route":"arriving");
+    tr._state=st;
+    const segs=tk.segs;
+    const vis=segs.length&&segs[0][0]<=t&&st!=="gone"&&!(t>segs[segs.length-1][1]&&st==="gone");
+    tr._vis=vis;
+    if(!vis)continue;
+    const p=trackAt(tk,t);
+    const hor=Math.abs(p.dx)>Math.abs(p.dz);
+    const bw=(hor?8.5:3.2)*S,bh=(hor?3.2:8.5)*S;
+    const bx=offX+(p.x-(hor?4.25:1.6)-WMIN)*S,by=proj(0,p.z+(hor?1.6:4.25))[1];
+    g.globalAlpha=0.95;
+    g.fillStyle=tr.kind==="IN"?IN_COLOR:OUT_COLOR;g.fillRect(bx,by,bw,bh);
+    g.globalAlpha=1;g.strokeStyle=INK;g.lineWidth=0.8;g.strokeRect(bx,by,bw,bh);
+    const late=Math.round((tr.arrival-tr.sched)/60);
+    g.fillStyle="#fff";g.font="600 9px system-ui";g.textAlign="center";g.textBaseline="middle";
+    g.fillText("T"+tid+" "+tr.kind+" "+fmtSigned(late)+"m",offX+(p.x-WMIN)*S,proj(0,p.z)[1]);
+  }
+  // agents
+  for(const[name,a]of Object.entries(agents)){
+    if(a.role==="truck")continue;
+    const p=trackAt(tracks[name],t);
+    const[sx,sy]=proj(p.x,p.z);
+    mmx.globalAlpha=p.active?1:0.38;
+    drawMarker(mmx,a.role,sx,sy);
+    mmx.globalAlpha=1;
+    if(p.carry){mmx.fillStyle="#a9784a";mmx.strokeStyle=INK;mmx.lineWidth=0.5;
+      mmx.fillRect(sx+0.9*S-2.5,sy-0.9*S-2.5,5,5);mmx.strokeRect(sx+0.9*S-2.5,sy-0.9*S-2.5,5,5);}
+  }
+  updateDom(t,tids);
+}
+
+// ---------- hud dom + charts ----------
+function updateDom(t,tids){
+  const sx=clamp(Math.floor(t/60),0,LOG.series.length-1),s=LOG.series[sx]||
+    {recv:0,stored:0,shipped:0,picked:0,replen:0,gate:0,doors:0,recv_used:0,lanes_used:0,busy:{}};
+  $("clock").textContent=hhmm(t);
+  $("counters").textContent=
+    "pallets received "+String(s.recv).padStart(3)+"   stored "+String(s.stored).padStart(3)+"   shipped "+String(s.shipped).padStart(3)+"\n"+
+    "cartons picked "+String(s.picked).padStart(5)+"   replen moves "+String(s.replen).padStart(3)+"\n"+
+    "gate queue "+s.gate+"   gates busy "+s.doors+"/"+cfg.dock_doors+" of "+doorsArr.length+"\n"+
+    "receiving "+s.recv_used+"/"+recvSpots+"   staging "+s.lanes_used+"/"+nLanes;
+  const notes=[];
+  for(let k=Math.max(0,nptr-8);k<nptr;k++){const tx=LOG.notes[k][1];notes.push(tx.length<46?tx:tx.slice(0,45)+".");}
+  $("feed").textContent=notes.join("\n");
+  const label={"en route":"not here yet",arriving:"arriving",gate:"waiting at gate",docked:"at dock",leaving:"leaving",gone:"done"};
+  let inN=0,outN=0,inA=0,outA=0,doneN=0;
+  for(const tid of tids){
+    const tr=trucks[String(tid)],el=trow[tid];if(!el)continue;
+    const isIn=tr.kind==="IN";
+    if(isIn)inN++;else outN++;
+    if(t>=tr.arrival){if(isIn)inA++;else outA++;}
+    if(tr._state==="gone")doneN++;
+    const arrived=t>=tr.arrival,late=Math.round((tr.arrival-tr.sched)/60);
+    let act=arrived?tr._state:"en route";
+    if(act==="en route"||act==="arriving")act=arrived?"gate":"en route";
+    const actual=arrived?hhmm(tr.arrival):"--:--";
+    const vs=arrived?fmtSigned(late).padStart(4)+" min":"        ";
+    el.textContent="T"+String(tid).padEnd(3)+"  "+String(tr.kind).padEnd(3)+"  "+hhmm(tr.sched)+"  "+actual+"  "+vs+"   "+(label[act]||act);
+    el.className="row"+(act==="done"?" done":(act==="gate"||act==="docked"||act==="leaving")?" active":"");
+  }
+  const nT=inN+outN;
+  $("tsum").textContent="truk "+nT+" = "+inN+" masuk + "+outN+" keluar\n"+
+    "tiba "+(inA+outA)+"/"+nT+" (masuk "+inA+"/"+inN+" · keluar "+outA+"/"+outN+") · selesai "+doneN+"/"+nT;
+  $("subtime").textContent=(playing?"simulated time | speed x"+speed+"   |   ":"simulated time   |   ")+"day start "+hhmm(0);
+  drawQ(sx,t);drawU(s,t);
+}
+function fitCanvas(c,hCss){
+  const dpr=window.devicePixelRatio||1;
+  const w=Math.max(40,c.clientWidth),h=hCss;
+  if(c.width!==Math.round(w*dpr)||c.height!==Math.round(h*dpr)){c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);}
+  const g=c.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);
+  return[g,w,h];
+}
+function drawQ(sx,t){
+  const[g,W,H]=fitCanvas(qC,150);
+  g.clearRect(0,0,W,H);
+  g.font="700 10px system-ui";g.fillStyle=INK;g.textAlign="left";g.fillText("Waiting in line (requests / trucks)",4,10);
+  const PAD=20,bh=13,T=LOG.series.map(r=>r.t),xw=Math.max(1,T[T.length-1]||1);
+  const raw=Math.max(1,...LOG.series.map(r=>Math.max(r.q_forklift,r.q_stacker,r.q_picker,r.q_checker,r.q_loader,r.gate)))*1.15+0.5;
+  const ystep=raw>45?10:5,yn=Math.ceil(raw/ystep)*ystep;
+  const X=v=>PAD+(v/xw)*(W-PAD-8),Y=v=>H-bh-(v/yn)*(H-bh-8);
+  // y gridlines + tick labels (reference has them)
+  g.font="7.5px system-ui";g.fillStyle=MUTED;g.textAlign="right";
+  for(let v=0;v<=yn;v+=ystep){
+    const yy=Y(v);
+    g.strokeStyle=GRID;g.lineWidth=0.6;g.beginPath();g.moveTo(PAD,yy);g.lineTo(W-8,yy);g.stroke();
+    g.fillText(String(v),PAD-4,yy+2.5);
+  }
+  g.strokeStyle=INK2;g.lineWidth=0.7;g.beginPath();g.moveTo(PAD,H-bh);g.lineTo(W-8,H-bh);g.stroke();
+  g.font="8px system-ui";g.fillStyle=MUTED;
+  for(let tk=0;tk<=xw;tk+=3600){
+    g.beginPath();g.moveTo(X(tk),H-bh);g.lineTo(X(tk),H-bh+3);g.stroke();
+    g.textAlign=tk<=1?"left":(tk>=xw-1800?"right":"center");
+    g.fillText(hhmm(tk),X(tk),H-3);
+    g.textAlign="center";
+  }
+  const k=clamp(sx+1,0,LOG.series.length);
+  const lines=[["q_forklift",ROLE.forklift.c],["q_stacker",ROLE.stacker.c],["q_picker",ROLE.picker.c],
+               ["q_checker",ROLE.checker.c],["q_loader",ROLE.loader.c],["gate",INK]];
+  for(const[key,col]of lines){
+    g.strokeStyle=col;g.lineWidth=1.3;
+    if(key==="gate")g.setLineDash([3,2]);else g.setLineDash([]);
+    g.beginPath();
+    for(let i=0;i<k;i++){const v=LOG.series[i][key];if(i)g.lineTo(X(T[i]),Y(v));else g.moveTo(X(T[i]),Y(v));}
+    g.stroke();
+  }
+  g.setLineDash([]);
+  g.strokeStyle=INK2;g.lineWidth=0.8;g.beginPath();g.moveTo(X(t),H-bh);g.lineTo(X(t),28);g.stroke();
+  // legend 3 cols x 2 rows, inside top of plot (reference layout: row1 forklift/stacker/picker, row2 checker/loader/gate)
+  g.font="8px system-ui";g.textAlign="left";
+  for(let r=0;r<2;r++)for(let c=0;c<3;c++){
+    const[key,col]=lines[r*3+c];
+    const lab=key==="gate"?"gate":key.slice(2);
+    const x=PAD+28+c*118,y=26+r*11;
+    g.fillStyle=col;g.fillRect(x,y-3,10,2.5);
+    g.fillStyle=MUTED;g.fillText(lab,x+13,y);
+  }
+}
+function drawU(s,t){
+  const[g,W,H]=fitCanvas(uC,118);
+  g.clearRect(0,0,W,H);
+  g.font="700 10px system-ui";g.fillStyle=INK;g.textAlign="left";g.fillText("Utilisation so far",4,10);
+  const x0=64,barW=Math.max(30,W-x0-40),el=Math.max(t,60);
+  ROLE_ORDER.forEach((r,i)=>{
+    const y=22+i*(H-26)/4.6,n=cfg[ROLE_N[r]],u=Math.min(100,100*(s.busy[r]||0)/(n*el));
+    g.fillStyle=GRID;g.fillRect(x0,y-4.5,barW,9);
+    g.fillStyle=ROLE[r].c;g.fillRect(x0,y-4.5,barW*u/100,9);
+    g.fillStyle=MUTED;g.font="9px system-ui";g.textAlign="left";g.fillText(r+" ("+n+")",4,y+3);
+    g.fillStyle=INK;g.fillText(Math.round(u)+"%",x0+barW+3,y+3);
+  });
+}
+
+// ---------- config drawer (staff counts + operation intervals -> new run) ----------
+const CFG=[
+ ["Staf &amp; peralatan",[
+  ["n_pickers","Picker",1,8],["n_checkers","Checker",1,8],["n_loaders","Pemuat (loader)",1,12],
+  ["n_forklifts","Forklift",1,6],["n_stackers","Stacker (reach truck)",1,6],
+  ["dock_doors","Gerbang aktif (dari 7)",1,7]]],
+ ["Muat / bongkar per pallet (detik)",[
+  ["t_load_pallet","Memuat",5,900],["t_unload_pallet","Membongkar",5,900]]],
+ ["Pengecekan",[
+  ["t_scan","Scan per karton (s)",1,900],["t_check_pallet","Cek per palet (s)",1,900],
+  ["t_doc_check","Cek dokumen per truk (s)",1,1800],["t_audit_line","Audit per baris (s)",1,900],
+  ["t_audit_fix","Perbaikan temuan audit (s)",0,1800],["p_audit_fail","Kegagalan audit (0–1)",0,1]]],
+ ["Rilis &amp; pengambilan",[
+  ["pick_lead_min","Rilis pick sebelum slot (menit)",0,240],["t_assign","Penugasan (s)",1,900],
+  ["t_alloc_base","Alokasi order — dasar (s)",5,1800],["t_alloc_line","Alokasi per baris (s)",1,1800],
+  ["t_pick_base","Pick dasar (s)",1,600],["t_drop","Taruh di staging (s)",1,600]]],
+ ["Material handling",[
+  ["t_fork_pos","Posisi forklift di rak (s)",0,600]]],
+ ["Jumlah truk hari ini",[
+  ["n_trucks_out","Truk keluar (outbound)",0,20],
+  ["n_trucks_in","Truk masuk (inbound)",0,20]]],
+ ["Jadwal truk",[
+  ["slot_gap_min","Jeda slot berangkat (menit)",5,240],["p_on_time","Peluang tepat waktu (0–1)",0,1],
+  ["late_mean_min","Rata-rata telat (menit)",0,300]]]
+];
+function buildCfg(){
+  const c2=LOG?LOG.meta.config:{};
+  const tp=(LOG&&LOG.meta.truck_plan)||{};
+  let nIn=0,nOut=0;
+  for(const k in trucks)(trucks[k].kind==="IN"?nIn++:nOut++);
+  const resolved={n_trucks_out:tp.outbound!==undefined?tp.outbound:nOut,
+                  n_trucks_in:tp.inbound!==undefined?tp.inbound:nIn};
+  let html="";
+  for(const[h,fs]of CFG){
+    html+="<h4>"+h+"</h4>";
+    html+=fs.map(([k,lab,lo,hi])=>{
+      const v=resolved[k]!==undefined?resolved[k]:(c2[k]!==undefined?c2[k]:"");
+      const hint=(k==="n_trucks_out"&&tp.scheduled_in_file!==undefined)
+        ?k+" · jadwal: "+tp.scheduled_in_file+" kiriman"
+        :k;
+      return '<div class="frow"><div><label>'+lab+'</label><span class="hint">'+hint+"</span></div>"+
+        '<input data-key="'+k+'" type="number" step="any" min="'+lo+'" max="'+hi+'" value="'+v+'"></div>';
+    }).join("");
+  }
+  $("cfgbody").innerHTML=html;
+}
+function openCfg(v){$("cfgdrawer").classList.toggle("open",v);$("cfgbtn").classList.toggle("on",v);}
+$("cfgbtn").onclick=()=>openCfg($("cfgdrawer").classList.contains("open")?false:true);
+$("cfgclose").onclick=()=>openCfg(false);
+async function refreshRuns(){
+  let runs=[];
+  try{const r=await fetch("/api/runs");if(r.ok)runs=(await r.json()).runs||[];}catch(e){}
+  const sel=$("runsel");const keep=simRun||curRun;
+  sel.innerHTML=runs.map(n=>'<option value="'+n+'"'+(n===keep?" selected":"")+'>'+
+    (n==="default"?"out/ (utama)":n)+"</option>").join("");
+  return runs;
+}
+async function runNew(){
+  if(!LOG)return;
+  setPlay(false);openCfg(true);
+  const btn=$("runbtn");btn.disabled=true;
+  const ov={};
+  document.querySelectorAll('#cfgbody input[data-key]').forEach(inp=>{
+    let v=parseFloat(inp.value);if(isNaN(v))return;
+    v=Math.min(Math.max(v,parseFloat(inp.min)),parseFloat(inp.max));
+    ov[inp.dataset.key]=v;
+  });
+  const nm=($('runname').value||"").trim().replace(/[^a-zA-Z0-9_-]/g,"").slice(0,40);
+  const st=$("cfgstatus");
+  const t0=performance.now();
+  const tmr=setInterval(()=>{st.textContent="menjalankan simulasi… "+Math.round((performance.now()-t0)/1000)+" s";},500);
+  st.textContent="menjalankan simulasi… 0 s";
+  try{
+    const r=await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:nm,overrides:ov})});
+    const j=await r.json();
+    if(j.ok){
+      st.textContent="selesai dalam "+j.seconds+" s → "+j.dir;
+      await loadRun(j.dir);
+      await refreshRuns();
+      openCfg(false);
+    }else{
+      st.textContent="gagal: "+(j.error||("http "+r.status));
+    }
+  }catch(e){st.textContent="gagal: "+e;}
+  finally{clearInterval(tmr);btn.disabled=false;}
+}
+$("runbtn").onclick=runNew;
+
+// ---------- playback ----------
+function loop(ts){
+  const dt=lastTs?(ts-lastTs)/1000:0;lastTs=ts;
+  if(playing&&LOG){
+    simT=Math.min(endT,simT+dt*speed);
+    renderFrame(simT);
+    if(simT>=endT)setPlay(false);
+    $("scrub").value=simT/endT;$("tlabel").textContent=hhmm(simT);
+  }
+  requestAnimationFrame(loop);
+}
+function setPlay(p){playing=p;$("play").textContent=p?"⏸ Jeda":"▶ Putar";}
+$("play").onclick=()=>{if(!LOG)return;if(!playing&&simT>=endT)simT=0;setPlay(!playing);};
+$("scrub").addEventListener("input",e=>{
+  if(!LOG)return;setPlay(false);
+  simT=+e.target.value*endT;
+  $("tlabel").textContent=hhmm(simT);
+  renderFrame(simT);
+});
+$("speeds").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  speed=+b.dataset.s;
+  [...$("speeds").children].forEach(x=>x.classList.toggle("on",x===b));
+});
+$("runsel").addEventListener("change",e=>{setPlay(false);loadRun(e.target.value);});
+
+let simRun=null;   // name of the last run started from this tab
+
+// ---------- boot ----------
+(async function boot(){
+  let runs=[];
+  try{const r=await fetch("/api/runs");if(r.ok)runs=(await r.json()).runs||[];}catch(e){}
+  const q=new URLSearchParams(location.search).get("run");
+  const pick=runs.includes(q)?q:(runs.includes("default")?"default":runs[0]);
+  const sel=$("runsel");
+  sel.innerHTML=runs.map(n=>'<option value="'+n+'"'+(n===pick?" selected":"")+'>'+(n==="default"?"out/ (utama)":n)+"</option>").join("");
+  if(!pick){$("loadmsg").textContent="tidak ada run di out/";return;}
+  await loadRun(pick);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

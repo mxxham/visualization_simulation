@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CKB WSM SUB 2 — Animasi Simulasi Gudang</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151a21; --panel2:#1b212b; --line:#2a3140; --txt:#e8ecf3; --mut:#8b96a8;
+    --acc:#4fb3ff; --ok:#37c988; --bad:#ff6666; --warn:#ffb454;
+    --c-picker:#4fb3ff; --c-checker:#f2c94c; --c-stacker:#c792ea;
+    --c-forklift:#ff8b5e; --c-loader:#5ad1c8; --c-truck:#ffdd57;
+  }
+  *{box-sizing:border-box} html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--txt);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:14px;margin:0;font-weight:600;white-space:nowrap}
+  .runsel{display:flex;gap:6px;align-items:center;color:var(--mut);font-size:12px}
+  select,button,input[type=number]{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
+  button{cursor:pointer} button:hover{border-color:var(--acc)} button:disabled{opacity:.45;cursor:default}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px}
+  .badge.ok{background:#123326;color:var(--ok)} .badge.bad{background:#33121a;color:var(--bad)}
+  main{flex:1;display:flex;min-height:0}
+  #stage{flex:1;position:relative;min-width:0}
+  canvas#map{position:absolute;inset:0;width:100%;height:100%;display:block;background:var(--bg)}
+  .strip{padding:6px 14px;background:var(--panel);border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .strip .playbtn{min-width:76px}
+  .speeds{display:flex;gap:4px}
+  .speeds button.on{border-color:var(--acc);color:var(--acc)}
+  input[type=range]{flex:1;min-width:160px;accent-color:var(--acc)}
+  .clock{font-variant-numeric:tabular-nums;font-weight:600;min-width:52px;text-align:center}
+  #tip{position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:11px;display:none;z-index:5;max-width:240px}
+  aside{width:392px;flex:none;overflow-y:auto;background:var(--panel);border-left:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:12px}
+  aside h2{font-size:11px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-weight:500}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .krow{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;padding:1px 0}
+  .krow .lab{color:var(--mut)}
+  .barrow{display:grid;grid-template-columns:120px 1fr 44px;gap:6px;align-items:center;padding:2px 0;font-size:12px}
+  .barrow .lbl{color:var(--mut)} .barrow .v{text-align:right;font-variant-numeric:tabular-nums}
+  .bar{height:8px;border-radius:4px;background:#252c39;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:4px}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:12px}
+  th,td{padding:3px 5px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--mut);font-weight:500;font-size:11px}
+  td.late{color:var(--warn)} tr.late td:first-child{color:var(--warn)}
+  .staffgrid{display:grid;grid-template-columns:1fr 64px;gap:4px 10px;align-items:center}
+  .stepper{display:flex;gap:3px;align-items:center;justify-content:flex-end}
+  .stepper b{min-width:22px;text-align:center;font-variant-numeric:tabular-nums}
+  .stepper button{width:22px;padding:0 0 2px;font-size:14px;line-height:1}
+  .status{font-size:12px;color:var(--mut);min-height:16px}
+  .feed{max-height:150px;overflow-y:auto;font-size:12px}
+  .feed div{padding:2px 0;border-bottom:1px dashed var(--line);cursor:pointer;color:var(--mut)}
+  .feed div:hover{color:var(--txt)}
+  .legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--mut);padding-top:6px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
+  #qchart{width:100%;height:56px;display:block}
+  .empty{color:var(--mut);font-size:12px;padding:6px 0}
+  .toggle{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
+  .toggle label{display:flex;gap:4px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>CKB WSM SUB 2 · Simulasi</h1>
+  <div class="runsel">
+    <span>Hasil</span>
+    <select id="runsel"><option value="default">out/ (utama)</option></select>
+  </div>
+  <div class="runsel">
+    <span>Level rak</span>
+    <select id="lvl">
+      <option value="-1">Semua</option><option value="0">A</option><option value="1">B</option>
+      <option value="2">C</option><option value="3">D</option><option value="4">E</option>
+    </select>
+  </div>
+  <div class="runsel">
+    <label for="pfck"><input type="checkbox" id="pfck" checked> tandai pickface</label>
+  </div>
+  <a href="dashboard.html" class="hdrlink" style="color:inherit;text-decoration:none;font-size:12px;border:1px solid #e3e2de;border-radius:6px;padding:3px 8px">↩ Dashboard KPI</a>
+  <span id="loadmsg" class="status" style="margin-left:auto"></span>
+</header>
+
+<main>
+  <div id="stage"><canvas id="map"></canvas><div id="tip"></div></div>
+
+  <aside>
+    <div class="card" id="card-sim">
+      <h2>Simulasi</h2>
+      <div class="krow"><span class="lab">Waktu hari ini</span><span id="know" style="font-weight:600">–</span></div>
+      <div class="krow"><span class="lab">Durasi simulasi</span><span id="kdur">–</span></div>
+      <div class="krow"><span class="lab">Picked / kirim / terima</span><span id="livetext" style="font-variant-numeric:tabular-nums">–</span></div>
+      <div class="krow"><span class="lab">Antrian saat ini</span><span id="livenow" style="font-variant-numeric:tabular-nums">–</span></div>
+      <div class="krow"><span class="lab">Pesanan</span><span id="orders">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Pegawai &amp; peralatan</h2>
+      <div class="staffgrid" id="staff"></div>
+      <div style="display:grid;grid-template-columns:1fr 64px 1fr 64px;gap:4px 10px;margin-top:8px;align-items:center">
+        <span style="color:var(--mut)">Truk</span>
+        <div class="stepper"><button data-step="trucks" data-d="-1" data-lo="1" data-hi="20">–</button><b id="n_trucks">12</b><button data-step="trucks" data-d="1" data-lo="1" data-hi="20">+</button></div>
+        <span style="color:var(--mut)">Seed</span>
+        <input type="number" id="n_seed" value="7" min="1" style="text-align:right">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+        <input type="checkbox" id="use_sched" checked>
+        <label for="use_sched" style="color:var(--mut);font-size:12px">Use real orders (daily schedule)</label>
+      </div>
+      <button id="rerun" style="margin-top:10px;width:100%;padding:7px;font-weight:600">▶ Jalankan ulang simulasi</button>
+      <div class="status" id="runstat"></div>
+    </div>
+
+    <div class="card">
+      <h2>Kinerja (util %)</h2>
+      <div id="kpi"></div>
+      <canvas id="qchart" height="56" style="margin-top:8px"></canvas>
+      <div class="legend" id="qlegend"></div>
+    </div>
+
+    <div class="card">
+      <h2>Truk</h2>
+      <div style="max-height:190px;overflow:auto"><table id="trucks">
+        <thead><tr><th>No</th><th>Jenis</th><th>Tujuan</th><th>Rencana</th><th>Tiba</th><th>Selisih</th><th>Putaran</th><th>Pal</th></tr></thead>
+        <tbody></tbody></table></div>
+      <div id="stockbadge" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Peristiwa</h2>
+      <div class="feed" id="feed"><div class="empty">belum ada kejadian</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Legenda</h2>
+      <div class="legend" id="legend"></div>
+      <div class="toggle" style="margin-top:8px">
+        <label><input type="checkbox" id="showagents" checked> orang &amp; forklift</label>
+        <label><input type="checkbox" id="showrack" checked> rak</label>
+        <label><input type="checkbox" id="showlanes" checked> staging/penerimaan</label>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div class="strip">
+  <button id="play" class="playbtn">▶ Putar</button>
+  <div class="speeds" id="speeds">
+    <button data-s="1" class="on">1×</button><button data-s="4">4×</button>
+    <button data-s="16">16×</button><button data-s="64">64×</button>
+  </div>
+  <input type="range" id="scrub" min="0" max="1" value="0" step="0.0001">
+  <span class="clock" id="clock">- - : - -</span>
+</div>
+
+<script>
+"use strict";
+/* Visible error banner: surfaces any JS failure on the page (esp. browser-specific),
+ * and beacons it to the server log. */
+const showErr=m=>{
+  let b=document.getElementById("errbar");
+  if(!b){b=document.createElement("div");b.id="errbar";
+    b.style.cssText="position:fixed;left:8px;bottom:44px;z-index:99;max-width:62%;background:#4a1218;color:#ffc9c9;border:1px solid #7c2a33;border-radius:8px;padding:8px 12px;font:12px/1.4 system-ui;white-space:pre-wrap";
+    document.body.appendChild(b);}
+  b.textContent="JS error: "+m;
+  try{fetch("/api/client-error",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({msg:String(m).slice(0,300),ua:navigator.userAgent.slice(0,140)})});}catch(e){}
+};
+window.addEventListener("error",e=>showErr(e.message||(e.error&&e.error.message)||"unknown"));
+window.addEventListener("unhandledrejection",e=>showErr((e.reason&&e.reason.message)||String(e.reason)));
+
+/* Replay of out/<run>/sim_log.json from wms_sim.py.
+ * World units are metres: x = bay axis (0 at the dock end, racks run away from the gates),
+ * z = block axis (CA..CF), y = height. Gates sit on the short west wall.
+ * Time is simulated seconds. 1x speed = 60 sim-seconds per wall second. */
+
+const ROLE_COLOR={picker:"--c-picker",checker:"--c-checker",
+  forklift:"--c-forklift",stacker:"--c-stacker",loader:"--c-loader",truck:"--c-truck"};
+const ROLE_LABEL={picker:"Picker",checker:"Checker",forklift:"Forklift",
+  stacker:"Stacker (reach)",loader:"Pemuat",truck:"Truk"};
+const ROLE_STAFF=[["pickers","Picker"],["checkers","Checker"],
+  ["stackers","Stacker (reach)"],["forklifts","Forklift"],["loaders","Pemuat"]];
+const QKEYS=[["q_forklift","Forklift","#ff8b5e"],["q_stacker","Stacker","#c792ea"],
+  ["q_loader","Pemuat","#5ad1c8"],["q_picker","Picker","#4fb3ff"],
+  ["q_checker","Checker","#f2c94c"]];
+/* grey empty → amber half → teal full */
+const RAMP=t=>{
+  if(t<=0)return"rgb(96,102,112)"; if(t>=1)return"rgb(38,166,154)";
+  const a=[96,102,112],b=[255,180,84],c=[38,166,154];
+  const m=t<.5?a:b, n=t<.5?b:c, u=t<.5?t*2:(t-.5)*2;
+  const v=m.map((x,i)=>Math.round(x+(n[i]-x)*u)); return`rgb(${v[0]},${v[1]},${v[2]})`;
+};
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const clampInt=(v,a,b)=>Math.max(a,Math.min(b,Math.round(Number.isNaN(+v)?a:+v)));
+const hh=s=>(s===null||s===undefined||s==="")?"–":(+s).toFixed(1);
+const esc=s=>String(s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const fmt=t=>{t=Math.max(0,Math.floor(t));const m=Math.floor(t/60)%60,h=Math.floor(t/3600)%24;
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");};
+
+let LOG=null,KPI=null,END=0,T0=25200,SPEED=1,PLAY=false,NOW=0;
+let binFrac=null,binRes=null,CUBES=null,layersDirty=true;
+let pBin=0,pLane=0,pRecv=0,pSeries=0,lanesState=[],recvState=[],truckStates={};
+let HIT=[],mouse=null;
+
+/* world → isometric canvas (3D, like the allocator render: gates on the short side,
+ * aisles running away from the viewer, rack ends visible deep in the building).
+ * World axes: x = bay axis (0 = dock end → 54 m deep), z = block axis (CA..CF), y = height. */
+let SCALE=9,PANX=0,PANY=0,viewDirty=true;
+const ORX=4,ORZ=14;                              // world point at the canvas centre (m)
+const AX={zx:0.86,zy:0.20,xx:0.50,xy:-0.72,h:0.62}; // z→right/down, x→right/up, y→up
+function projR(x,z,y){return[(z-ORZ)*AX.zx+(x-ORX)*AX.xx,(z-ORZ)*AX.zy+(x-ORX)*AX.xy-(y||0)*AX.h];}
+function proj(x,z,y){const p=projR(x,z,y);return[p[0]*SCALE+W/2+PANX,p[1]*SCALE+H/2+PANY];}
+function fitMap(){
+  if(!W||!H)return;
+  let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+  for(const c of[[-62,-8,0],[57,-8,0],[-62,31,0],[57,31,0],
+                 [-62,-8,7.7],[57,-8,7.7],[-62,31,7.7],[57,31,7.7]]){
+    const p=projR(c[0],c[1],c[2]);
+    x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);
+  }
+  SCALE=Math.min(W/(x1-x0),H/(y1-y0))*0.97;
+  PANX=-(x0+x1)/2*SCALE;PANY=-(y0+y1)/2*SCALE;   // proj() already adds W/2, H/2
+}
+
+const canvas=document.getElementById("map"),ctx=canvas.getContext("2d");
+let W=0,H=0,DPR=1;
+
+function resize(){DPR=window.devicePixelRatio||1;const s=document.getElementById("stage");
+  W=s.clientWidth;H=s.clientHeight;canvas.width=W*DPR;canvas.height=H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);fitMap();layersDirty=true;}
+window.addEventListener("resize",()=>{resize();draw();});
+
+/* ---------- event pointers ---------- */
+function resetPointers(){
+  binFrac=Float32Array.from(LOG.initial_state);
+  binRes=new Uint8Array(LOG.bins.length);
+  lanesState=new Array(LOG.meta.lanes).fill(0);
+  recvState=new Array(LOG.meta.recv_spots).fill(0);
+  pBin=0;pLane=0;pRecv=0;layersDirty=true;
+  while(pBin<LOG.bin_ev.length&&LOG.bin_ev[pBin][0]<=NOW){
+    const[,idx,fr,res]=LOG.bin_ev[pBin++];binFrac[idx]=fr;binRes[idx]=res;}
+  while(pLane<LOG.lane_ev.length&&LOG.lane_ev[pLane][0]<=NOW){
+    const[,l,n]=LOG.lane_ev[pLane++];if(l<lanesState.length)lanesState[l]=n;}
+  while(pRecv<LOG.recv_ev.length&&LOG.recv_ev[pRecv][0]<=NOW){
+    const[,s,o]=LOG.recv_ev[pRecv++];if(s<recvState.length)recvState[s]=o;}
+  pSeries=0;const se=LOG.series;while(pSeries<se.length-1&&se[pSeries+1].t<=NOW)pSeries++;
+}
+function advanceEvents(){
+  const dir=arguments.length?arguments[0]:1;
+  const ev=LOG.bin_ev;
+  while(pBin<ev.length&&ev[pBin][0]<=NOW){const[,idx,fr,res]=ev[pBin++];binFrac[idx]=fr;binRes[idx]=res;layersDirty=true;}
+  const le=LOG.lane_ev;
+  while(pLane<le.length&&le[pLane][0]<=NOW){const[,l,n]=le[pLane++];if(l<lanesState.length)lanesState[l]=n;}
+  const re=LOG.recv_ev;
+  while(pRecv<re.length&&re[pRecv][0]<=NOW){const[,s,o]=re[pRecv++];if(s<recvState.length)recvState[s]=o;}
+  const se=LOG.series;
+  while(pSeries<se.length-1&&se[pSeries+1].t<=NOW)pSeries++;
+}
+function seek(t){
+  NOW=Math.min(Math.max(t,0),END);
+  resetPointers();
+  for(const id in LOG.trucks){const st=LOG.trucks[id].states;let cur=null;
+    for(const s of st){if(s[0]<=NOW)cur=s[1];else break;} truckStates[id]=cur||null;}
+  if(NOW>=END){PLAY=false;playBtn();}
+  updateFeed();syncStrip();
+}
+
+/* ---------- agents ---------- */
+function agentPos(a,t){
+  let x=a.home[0],z=a.home[1];
+  const segs=a.segs;
+  for(const s of segs){
+    if(s[1]<=t){const p=s[2][s[2].length-1];x=p[0];z=p[1];continue;}
+    if(s[0]<=t){const f=(t-s[0])/Math.max(.001,s[1]-s[0]);return lerpPts(s[2],f);}
+  }
+  return[x,z];
+}
+function lerpPts(pts,f){
+  if(pts.length===1)return pts[0];
+  let tot=0,ds=[];
+  for(let i=0;i<pts.length-1;i++){const d=Math.abs(pts[i+1][0]-pts[i][0])+Math.abs(pts[i+1][1]-pts[i][1]);ds.push(d);tot+=d;}
+  if(!tot)return pts[pts.length-1];
+  let rem=f*tot;
+  for(let i=0;i<ds.length;i++){
+    const u=ds[i]?Math.min(1,rem/ds[i]):0;
+    if(rem<=ds[i]||i===ds.length-1)
+      return[pts[i][0]+(pts[i+1][0]-pts[i][0])*u,pts[i][1]+(pts[i+1][1]-pts[i][1])*u];
+    rem-=ds[i];
+  }
+  return pts[pts.length-1];
+}
+function activeLabel(a,t){
+  for(const s of a.segs)if(t>=s[0]&&t<=s[1])return s[3]||"";
+  const p=a.segs.filter(s=>s[1]<=t);
+  return p.length?(p[p.length-1][3]||""):("");
+}
+
+/* ---------- drawing (isometric 3D) ---------- */
+function shade(rgb,f){                      // f>0 lighten towards white, f<0 darken
+  return`rgb(${rgb.map(v=>Math.round(f>0?v+(255-v)*f:v*(1+f))).join(",")})`;}
+function ramp3(t){
+  if(t<=0)return[197,191,178];if(t>=1)return[38,166,154];
+  const a=[216,211,200],b=[255,180,84],c=[38,166,154];
+  const m=t<.5?a:b,n=t<.5?b:c,u=t<.5?t*2:(t-.5)*2;
+  return m.map((x,i)=>x+(n[i]-x)*u);
+}
+/* static cube geometry, rebuilt when the view or data changes; painter key d = x - .3z
+ * (large x = deep in the building = far, large z = block CF side = near) */
+function buildCubes(){
+  CUBES=[];
+  const pfset=new Set(Object.values(LOG.pickfaces||{}));
+  for(let i=0;i<LOG.bins.length;i++){
+    const[code,x,y,z,lane,face,lv,bay,pos]=LOG.bins[i];
+    if(lv<0||lv>4)continue;
+    const xa=x-0.675,xb=x+0.675,za=z-0.475,zb=z+0.475,yb=y+1.25;
+    const c={i,lv,code,
+      top:[proj(xa,za,yb),proj(xb,za,yb),proj(xb,zb,yb),proj(xa,zb,yb)],
+      wx:[proj(xa,zb,yb),proj(xa,za,yb),proj(xa,za,0),proj(xa,zb,0)],
+      sz:[proj(xa,zb,yb),proj(xb,zb,yb),proj(xb,zb,0),proj(xa,zb,0)],
+      d:x*1.0-z*0.30,pf:pfset.has(code),res:!!(binRes&&binRes[i])};
+    const base=ramp3(binFrac?binFrac[i]:0);
+    c.topC=shade(base,0.18);c.wxC=shade(base,-0.30);c.szC=shade(base,-0.08);
+    CUBES.push(c);
+  }
+  CUBES.sort((a,b)=>b.d-a.d);
+}
+function poly(pts,fill){ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);
+  for(let k=1;k<pts.length;k++)ctx.lineTo(pts[k][0],pts[k][1]);
+  ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill();}}
+function box3(xa,xb,za,zb,y1,topC,wxC,szC){
+  const t=[proj(xa,za,y1),proj(xb,za,y1),proj(xb,zb,y1),proj(xa,zb,y1)];
+  const w=[proj(xa,zb,y1),proj(xa,za,y1),proj(xa,za,0),proj(xa,zb,0)];
+  const s=[proj(xa,zb,y1),proj(xb,zb,y1),proj(xb,zb,0),proj(xa,zb,0)];
+  poly(w,wxC);poly(s,szC);poly(t,topC);return t;
+}
+function drawCube(c,alpha,pfOn){
+  ctx.globalAlpha=alpha;
+  poly(c.wx,c.wxC);poly(c.sz,c.szC);poly(c.top,c.topC);
+  if(c.res){ctx.strokeStyle="rgba(255,255,255,.5)";ctx.lineWidth=1;poly(c.top);ctx.stroke();}
+  if(pfOn){ctx.strokeStyle="rgba(43,108,235,.95)";ctx.lineWidth=1.2;poly(c.top);ctx.stroke();}
+  ctx.globalAlpha=1;
+}
+function quadW(a,b,c,d,fill){poly([a,b,c,d],fill);}
+function drawFloor(){
+  quadW(proj(-24,-8,0),proj(57,-8,0),proj(57,31,0),proj(-24,31,0),"#f0ede4");   // building slab
+  quadW(proj(-62,-8,0),proj(-24,-8,0),proj(-24,31,0),proj(-62,31,0),"#e4dfd2"); // dock apron + yard
+  for(let a=0;a<5;a++){                                   // picking aisles
+    const z0=a*5.6+0.75,z1=a*5.6+4.85;
+    quadW(proj(-2.5,z0,0),proj(56.5,z0,0),proj(56.5,z1,0),proj(-2.5,z1,0),"#e8e3d6");
+  }
+  quadW(proj(-2.5,-3,0),proj(0,-3,0),proj(0,31,0),proj(-2.5,31,0),"#e8e3d6");  // front corridor
+  // dock wall (short side) with 7 gate openings
+  ctx.strokeStyle="#a49d8d";ctx.lineWidth=2.5;
+  const wl=[proj(-13.5,-3,0.0),proj(-13.5,31,0.0)];
+  ctx.beginPath();ctx.moveTo(wl[0][0],wl[0][1]);ctx.lineTo(wl[1][0],wl[1][1]);ctx.stroke();
+  ctx.fillStyle="#7d7668";ctx.font="bold 11px system-ui";
+  const p1=proj(7,-2.7,0);ctx.fillText("Rak CA–CF · 20 bay",p1[0],p1[1]);
+  ctx.font="bold 10px system-ui";ctx.fillStyle="#6b6455";
+  for(let a=0;a<6;a++){const pb=proj(-1.4,a*5.6-0.2,0);
+    ctx.fillText("C"+"ABCDEF"[a],pb[0],pb[1]);}
+  const p2=proj(53.5,14,0);ctx.fillStyle="#8d8676";
+  ctx.fillText("ujung rak · bay 20",p2[0],p2[1]);
+}
+function drawStaging(){
+  const M=LOG.meta;
+  for(let i=0;i<M.lanes;i++){
+    const z=(i+2)*1.4,n=lanesState[i]||0;
+    const fill=n===0?"#d3cec0":n<0?"#c2bcad":n>=3?"#93cbb0":"#aed4bf";
+    quadW(proj(-9.2,z-0.6,0),proj(-6.6,z-0.6,0),proj(-6.6,z+0.6,0),proj(-9.2,z+0.6,0),fill);
+    if(i%2===0){const p=proj(-9.2,z-0.6,0);
+      ctx.fillStyle="#6f6a5e";ctx.font="8px system-ui";
+      ctx.fillText("STG"+(i+1),p[0]-4,p[1]+((i/2)%2?13:9));}
+  }
+  const p=proj(-9.2,1.2,0);ctx.fillStyle="#6f6a5e";ctx.font="9px system-ui";
+  ctx.fillText("Staging",p[0],p[1]-4);
+}
+function drawRecv(){
+  const[r0,z0,dz]=LOG.meta.recv;
+  for(let i=0;i<LOG.meta.recv_spots;i++){
+    const z=z0+dz*i,used=recvState[i];
+    quadW(proj(r0-0.8,z-0.35,0),proj(r0+0.8,z-0.35,0),proj(r0+0.8,z+0.35,0),proj(r0-0.8,z+0.35,0),
+      used?"#b3a0d4":"#d3cec0");
+  }
+  const p=proj(r0,z0-1.6,0);ctx.fillStyle="#6f6a5e";ctx.font="9px system-ui";
+  ctx.fillText("Penerimaan",p[0],p[1]-3);
+}
+function drawDoors(){
+  const act=LOG.meta.config.dock_doors;
+  LOG.meta.doors.forEach(([x,z],i)=>{
+    const on=i<act;
+    quadW(proj(x-2.6,z-1.25,0),proj(x+1.3,z-1.25,0),proj(x+1.3,z+1.25,0),proj(x-2.6,z+1.25,0),
+      on?"#b8c9b4":"#ddd8cb");
+    const p=proj(x-1.2,z,0);
+    ctx.fillStyle=on?"#2f5e46":"#8d8676";ctx.font=(on?"bold ":"")+"9px system-ui";
+    ctx.fillText("G"+(i+1)+(on?" ●":""),p[0]-6,p[1]+3);
+  });
+  // truck waiting yard: 40 slots at (-27-5.5*row, -1+4.6*col) — matches wms_sim.py
+  ctx.strokeStyle="#b9b3a3";ctx.lineWidth=1;
+  for(let i=0;i<40;i++){
+    const wx=-27-5.5*(i/7|0),wz=-1+4.6*(i%7);
+    poly([proj(wx-2.6,wz-1.25,0),proj(wx+2.6,wz-1.25,0),proj(wx+2.6,wz+1.25,0),proj(wx-2.6,wz+1.25,0)]);
+    ctx.stroke();
+  }
+  const p=proj(-42,-4.5,0);ctx.fillStyle="#8d8676";ctx.font="9px system-ui";
+  ctx.fillText(`Halte truk (antre) · ${act} dari 7 gerbang aktif`,p[0],p[1]);
+}
+function collectSprites(out){
+  HIT.length=0;
+  for(const[name,a]of Object.entries(LOG.agents)){
+    const role=a.role,isTruck=role==="truck";
+    if(isTruck){const st=truckStates[name.replace(/^T/,"")];if(st=="gone"||st==null)continue;}
+    const[x,z]=agentPos(a,NOW),p=proj(x,z,0.95);
+    HIT.push([name,a,p[0],p[1]]);
+    out.push({kind:isTruck?"truck":"agent",name,a,x,z,d:x*1.0-z*0.30});
+  }
+}
+function isCarrying(a){for(const s of a.segs)if(NOW>=s[0]&&NOW<=s[1]&&s[5]===1)return true;return false;}
+function drawAgentSprite(s){
+  const b=proj(s.x,s.z,0),t=proj(s.x,s.z,1.75),carr=isCarrying(s.a);
+  ctx.fillStyle="rgba(90,85,75,.25)";
+  ctx.beginPath();ctx.ellipse(b[0],b[1],carr?4.5:3,2,0,0,6.2832);ctx.fill();
+  ctx.strokeStyle=s.a.role==="truck"?"#c8b26a":css(ROLE_COLOR[s.a.role]||"#333");
+  ctx.lineWidth=carr?5.2:3.6;ctx.lineCap="round";
+  ctx.beginPath();ctx.moveTo(b[0],b[1]);ctx.lineTo(t[0],t[1]);ctx.stroke();
+}
+function drawTruckSprite(s){
+  const cx=s.x,cz=s.z,xa=cx-4.3,xb=cx+4.3,za=cz-1.25,zb=cz+1.25;
+  box3(xa,xb-2.3,za,zb,2.65,"#e6e8ea","#b9bec6","#d2d6db");          // box body
+  box3(xb-2.3,xb,za,zb,2.15,"#5f6672","#3f454f","#5a616c");          // cab (nose → dock wall)
+  const p=proj(cx,cz,3.1);
+  ctx.fillStyle="#4d535d";ctx.font="bold 9px system-ui";ctx.textAlign="center";
+  ctx.fillText(s.name.replace("T",""),p[0],p[1]);ctx.textAlign="left";
+}
+let RENDER=[];
+function draw(){
+  if(!LOG){ctx.clearRect(0,0,W,H);return;}
+  const showRack=document.getElementById("showrack").checked,
+        showLanes=document.getElementById("showlanes").checked,
+        showAgents=document.getElementById("showagents").checked,
+        pfOn=document.getElementById("pfck").checked,
+        lvlSel=+document.getElementById("lvl").value;
+  if(layersDirty||!CUBES){buildCubes();layersDirty=false;viewDirty=true;}
+  if(PLAY||viewDirty){
+    viewDirty=false;
+    ctx.fillStyle="#f3f1ea";ctx.fillRect(0,0,W,H);
+    drawFloor();
+    if(showLanes){drawStaging();drawRecv();}
+    drawDoors();
+    RENDER.length=0;
+    if(showRack)for(const c of CUBES)RENDER.push(c);
+    if(showAgents)collectSprites(RENDER);
+    RENDER.sort((a,b)=>b.d-a.d);
+    for(const s of RENDER){
+      if(s.kind==="agent"){drawAgentSprite(s);continue;}
+      if(s.kind==="truck"){drawTruckSprite(s);continue;}
+      const ghost=lvlSel>=0&&s.lv!==lvlSel;
+      drawCube(s,ghost?0.12:1,pfOn&&s.pf&&!ghost);
+    }
+    const s=LOG.series[pSeries];
+    if(s){
+      ctx.font="10px system-ui";ctx.fillStyle="#6f6a5e";
+      ctx.fillText(`antrian: forklift ${s.q_forklift} · stacker ${s.q_stacker||0} · pemuat ${s.q_loader} · picker ${s.q_picker} · gerbang ${s.gate}`,10,H-10);
+    }
+  }
+  const se=LOG.series[pSeries];
+  if(se){
+    document.getElementById("livenow").textContent=`FK ${se.q_forklift} · ST ${se.q_stacker||0} · L ${se.q_loader} · P ${se.q_picker} · gate ${se.gate}`;
+    document.getElementById("livetext").textContent=`${se.picked} / ${se.shipped} / ${se.recv}`;
+  }
+  document.getElementById("know").textContent=fmt(T0+NOW);
+  document.getElementById("clock").textContent=fmt(T0+NOW);
+  document.getElementById("scrub").value=END?NOW/END:0;
+  updateFeed();
+  drawTip(showRack);
+}
+
+/* ---------- tooltip + pan/zoom ---------- */
+canvas.addEventListener("mousemove",e=>{const r=canvas.getBoundingClientRect();mouse=[e.clientX-r.left,e.clientY-r.top];});
+canvas.addEventListener("mouseleave",()=>{mouse=null;});
+canvas.addEventListener("wheel",e=>{                      // zoom around the cursor
+  e.preventDefault();
+  const f=e.deltaY<0?1.12:1/1.12,r=canvas.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  PANX=mx-(mx-PANX)*f;PANY=my-(my-PANY)*f;SCALE*=f;viewDirty=true;draw();
+},{passive:false});
+let dragPt=null;
+canvas.addEventListener("pointerdown",e=>{dragPt=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener("pointermove",e=>{
+  if(dragPt){const r=canvas.getBoundingClientRect();
+    PANX+=e.clientX-dragPt[0];PANY+=e.clientY-dragPt[1];dragPt=[e.clientX,e.clientY];
+    mouse=[e.clientX-r.left,e.clientY-r.top];viewDirty=true;draw();}
+});
+canvas.addEventListener("pointerup",()=>{dragPt=null;});
+canvas.addEventListener("dblclick",()=>{fitMap();viewDirty=true;draw();});
+function drawTip(showRack){
+  const tip=document.getElementById("tip");
+  if(!mouse){tip.style.display="none";return;}
+  let best=null,kind=null,bd=150;
+  for(const[name,a,cx,cy]of HIT){const d=(cx-mouse[0])**2+(cy-mouse[1])**2;if(d<bd){bd=d;best=[name,a];kind="agent";}}
+  if(!best&&showRack&&CUBES){                    // nearest bin top-face centre
+    for(const c of CUBES){
+      const px=(c.top[0][0]+c.top[2][0])/2,py=(c.top[0][1]+c.top[2][1])/2;
+      const d=(px-mouse[0])**2+(py-mouse[1])**2;
+      if(d<bd){bd=d;best=c;kind="bin";}
+    }
+  }
+  if(!best){tip.style.display="none";return;}
+  if(kind==="bin"){
+    const fr=binFrac?binFrac[best.i]:0;
+    tip.innerHTML=`<b>${best.code}</b> · lantai ${"ABCDE"[best.lv]}<br>isi ${(fr*100).toFixed(0)}%${best.res?" · <b style='color:#2b6ceb'>reserved</b>":""}`;
+    tip.style.display="block";
+    tip.style.left=Math.min(mouse[0]+14,W-260)+"px";
+    tip.style.top=(mouse[1]+14)+"px";
+    return;
+  }
+  const[name,a]=best,label=activeLabel(a,NOW);
+  let extra="";
+  if(a.role==="truck"&&LOG.trucks[name.replace(/^T/,"")]){
+    const t=LOG.trucks[name.replace(/^T/,"")];
+    let late=`<br>rencana ${fmt(T0+t.sched)} · tiba <b style="color:${lateColor(t)}">${fmt(T0+t.arrival)}</b>`;
+    if(t.sid)late=`<br>${esc(t.sid)} → ${esc(t.dest||"")}${t.city?" · "+esc(t.city):""}`+late;
+    extra=late;
+  }
+  tip.innerHTML=`<b style="color:${cssSafe(ROLE_COLOR[a.role])}">${name}</b> — ${ROLE_LABEL[a.role]||a.role}${label?"<br>"+esc(label):""}${extra}`;
+  tip.style.display="block";
+  tip.style.left=Math.min(mouse[0]+14,W-260)+"px";
+  tip.style.top=(mouse[1]+14)+"px";
+}
+function lateColor(t){const d=(t.arrival-t.sched)/60;return d>15?css("--bad"):(d<-5?css("--ok"):css("--mut"));}
+function cssSafe(v){return css(v);}
+
+/* ---------- main loop ---------- */
+let last=performance.now();
+function frameLoop(ts){
+  const dt=(ts-last)/1000;last=ts;
+  if(PLAY&&LOG){
+    let target=NOW+dt*60*SPEED;
+    if(target>=END){advanceTo(END);PLAY=false;playBtn();}
+    else advanceTo(target);
+  }
+  draw();
+  requestAnimationFrame(frameLoop);
+}
+function advanceTo(t){
+  NOW=t;advanceEvents();
+  for(const id in LOG.trucks){const st=LOG.trucks[id].states;
+    let cur=null;for(const s of st){if(s[0]<=NOW)cur=s[1];else break;}truckStates[id]=cur||null;}
+  syncStrip();
+}
+let lastFeedTop=0;
+function updateFeed(){
+  const feed=document.getElementById("feed");
+  const rows=LOG.notes.filter(n=>n[0]<=NOW);
+  const key=rows.length;
+  if(key===lastFeedTop)return;
+  lastFeedTop=key;
+  const top=rows.slice(-40);
+  feed.innerHTML=top.length?top.map(([t,txt])=>`<div data-t="${t}"><b style="color:var(--mut)">${fmt(T0+t)}</b> ${esc(txt)}</div>`).join("")
+                           :"<div class='empty'>belum ada kejadian</div>";
+  feed.querySelectorAll("div[data-t]").forEach(d=>d.onclick=()=>{seek(+d.dataset.t);PLAY=false;playBtn();});
+  feed.scrollTop=feed.scrollHeight;
+}
+function syncStrip(){
+  const s=LOG.series[pSeries];
+  if(s){
+    document.getElementById("livetext").textContent=`${s.picked} / ${s.shipped} / ${s.recv}`;
+    document.getElementById("livenow").textContent=`FK ${s.q_forklift} · ST ${s.q_stacker||0} · L ${s.q_loader} · P ${s.q_picker} · gate ${s.gate}`;
+  }
+}
+
+/* ---------- controls ---------- */
+const playBtn=()=>{document.getElementById("play").textContent=PLAY?"⏸ Jeda":"▶ Putar";};
+document.getElementById("play").onclick=()=>{
+  if(!LOG)return;
+  if(NOW>=END){NOW=0;resetPointers();}
+  PLAY=!PLAY;playBtn();
+};
+document.getElementById("speeds").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  SPEED=+b.dataset.s;
+  document.querySelectorAll("#speeds button").forEach(x=>x.classList.toggle("on",x===b));
+});
+document.getElementById("scrub").oninput=e=>{
+  if(!LOG)return;PLAY=false;playBtn();seek(+e.target.value*END);
+};
+document.getElementById("lvl").onchange=()=>{layersDirty=true;};
+document.getElementById("pfck").onchange=()=>{layersDirty=true;};
+["showagents","showrack","showlanes"].forEach(id=>document.getElementById(id).onchange=()=>{viewDirty=true;draw();});
+
+/* stepper buttons (staff + trucks) */
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button[data-step]");if(!b)return;
+  const el=document.getElementById("n_"+b.dataset.step);
+  el.textContent=clampInt(+el.textContent+ +b.dataset.d,+b.dataset.lo,+b.dataset.hi);
+});
+
+/* ---------- staff panel ---------- */
+function fillStaff(){
+  const box=document.getElementById("staff");
+  const f=LOG.meta.config;
+  box.innerHTML=ROLE_STAFF.map(([k,label])=>`<span>${label}</span>
+    <div class="stepper"><button data-step="${k}" data-d="-1" data-lo="0" data-hi="12">–</button>
+    <b id="n_${k}">${f["n_"+k]??0}</b>
+    <button data-step="${k}" data-d="1" data-lo="0" data-hi="12">+</button></div>`).join("");
+  document.getElementById("n_trucks").textContent=f.n_trucks??12;
+  document.getElementById("n_seed").value=String(f.seed??7);
+}
+
+/* runs list + load */
+async function loadRuns(){
+  try{
+    const j=await(await fetch("/api/runs")).json();
+    const sel=document.getElementById("runsel");
+    sel.querySelectorAll("option:not([value=default])").forEach(o=>o.remove());
+    j.runs.sort().forEach(r=>{const o=document.createElement("option");o.value=r;o.textContent="out/"+r;sel.appendChild(o);});
+  }catch(e){}
+}
+async function loadRun(dir){
+  const base=dir==="default"?"/out/":`/out/${dir}/`;
+  msg("memuat…");
+  let log=null;
+  try{
+    log=await fetch(base+"sim_log.json").then(r=>{
+      if(!r.ok)throw new Error("HTTP "+r.status);return r.json()});}
+  catch(e){
+    LOG=null;KPI=null;lastFeedTop=-1;
+    msg("belum ada hasil — klik “Jalankan ulang simulasi”");
+    syncKPI(null);syncTrucks(null);lastFeedTop=-1;return;
+  }
+  let k=null;
+  try{k=await fetch(base+"kpis.json").then(r=>r.ok?r.json():null);}
+  catch(e){k=null;}                       // animation must survive a missing kpis.json
+  setLog(log,k);msg("");
+}
+function msg(s){document.getElementById("loadmsg").textContent=s;}
+document.getElementById("runsel").addEventListener("change",e=>loadRun(e.target.value));
+
+/* rerun with staff counts */
+document.getElementById("rerun").onclick=async()=>{
+  const st=document.getElementById("runstat");
+  const params={pickers:staffV("pickers"),checkers:staffV("checkers"),
+    stackers:staffV("stackers"),forklifts:staffV("forklifts"),loaders:staffV("loaders"),
+    trucks:clampInt(document.getElementById("n_trucks").textContent,1,20),
+    seed:clampInt(document.getElementById("n_seed").value,1,999999),
+    schedule:document.getElementById("use_sched").checked};
+  const btn=document.getElementById("rerun");btn.disabled=true;btn.textContent="⏳ berjalan…";
+  st.textContent="simulasi berjalan, perhatikan panel kiri";
+  try{
+    const r=await fetch("/api/simulate",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(params)});
+    const j=await r.json();
+    if(!j.ok){st.textContent="gagal: "+String(j.error||("HTTP "+r.status)).slice(-140);btn.textContent="▶ Jalankan ulang simulasi";btn.disabled=false;return;}
+    st.textContent=`selesai ${j.seconds}s → out/${j.dir}`;
+    await loadRuns();
+    document.getElementById("runsel").value=j.dir;
+    await loadRun(j.dir);
+  }catch(e){st.textContent="gagal: "+e;}
+  btn.textContent="▶ Jalankan ulang simulasi";btn.disabled=false;
+};
+function staffV(k){return clampInt(document.getElementById("n_"+k).textContent,0,12);}
+
+/* ---------- KPI + trucks panels ---------- */
+function setLog(log,k){
+  LOG=log;KPI=k;END=log.meta.end;T0=log.meta.t0;NOW=0;PLAY=false;playBtn();
+  binFrac=Float32Array.from(log.initial_state);binRes=new Uint8Array(log.bins.length);
+  truckStates={};pBin=0;pLane=0;pRecv=0;pSeries=0;lastFeedTop=-1;
+  layersDirty=true;fillStaff();
+  document.getElementById("kdur").textContent=(END/3600).toFixed(2)+" jam";
+  document.getElementById("use_sched").checked=!!(k&&k.schedule);
+  const or=document.getElementById("orders");
+  or.textContent=k&&k.schedule?`${k.schedule.shipments} kiriman nyata (${k.schedule.file})`:"sintetis";
+  syncKPI(k);syncTrucks(k,false,log);fillLegend();
+  seek(0);draw();
+}
+function syncKPI(k){
+  const box=document.getElementById("kpi");
+  if(!k){box.innerHTML="<div class='empty'>tidak ada KPI</div>";
+    document.getElementById("stockbadge").innerHTML="";return;}
+  const rows=Object.entries(k.utilisation_pct||[]?k.utilisation_pct:{}).map(([r,v])=>{
+    const c=cssSafe(ROLE_COLOR[r]);
+    return`<div class="barrow"><span class="lbl">${ROLE_LABEL[r]||r}</span>
+      <span class="bar"><i style="width:${Math.min(100,+v)}%;background:${c}"></i></span>
+      <span class="v">${v}%</span></div>`;
+  }).join("");
+  const waits=Object.entries(k.avg_wait_min||{}).map(([r,v])=>
+    `<div class="krow"><span class="lab">${ROLE_LABEL[r]||r}</span><span>${v} / ${(k.p90_wait_min||{})[r]??0} mnt</span></div>`).join("");
+  box.innerHTML=rows+
+    `<div style="margin-top:8px;color:var(--mut);font-size:11px">Rata-rata / p90 menunggu (menit)</div>`+waits;
+  const st=k.stock_check;
+  document.getElementById("stockbadge").innerHTML=st?
+    `<span class="badge ${st.balanced?"ok":"bad"}">${st.balanced?"✓ stok seimbang":"✗ STOK TIDAK SEIMBANG"}</span>
+     <span style="color:var(--mut);font-size:11px;margin-left:6px">
+     awal ${st.initial} · masuk ${st.inbound} · keluar ${st.outbound} · akhir ${st.final}</span>`:"";
+  drawQueueChart();
+}
+function drawQueueChart(){
+  const c=document.getElementById("qchart"),g=c.getContext("2d");
+  c.width=c.clientWidth||300;c.height=56;
+  g.clearRect(0,0,c.width,56);
+  const se=LOG.series;if(!se.length)return;
+  let m=0;for(const s of se){for(const[k]of QKEYS)m=Math.max(m,s[k]||0);}m=Math.max(4,m);
+  for(const[k,label,color]of QKEYS.slice(0,5)){
+    g.beginPath();
+    se.forEach((s,i)=>{const x=i/(se.length-1)*c.width,y=52-((s[k]||0)/m)*46;
+      i?g.lineTo(x,y):g.moveTo(x,y);});
+    g.strokeStyle=color;g.lineWidth=1.1;g.stroke();
+  }
+  document.getElementById("qlegend").innerHTML=QKEYS.slice(0,5).map(([k,l,c])=>`<span><i style="background:${c};width:8px;height:3px;border-radius:1px"></i>${l}</span>`).join("");
+}
+function syncTrucks(k){
+  const tb=document.querySelector("#trucks tbody");
+  if(!k){tb.innerHTML=`<tr><td colspan="8" class="empty">belum ada KPI</td></tr>`;return;}
+  const rows=(KPI.trucks||[]).slice().sort((a,b)=>a.truck-b.truck);
+  tb.innerHTML=rows.map(r=>`<tr${r.late_min>15?' class="late"':""} title="${esc(r.sid+" · "+r.dest+(r.ttype?" · "+r.ttype:""))}">
+    <td>${r.truck}</td><td>${r.type}</td>
+    <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.city||"")}</td>
+    <td>${r.planned}</td>
+    <td>${r.arrived}</td><td class="late">${r.late_min>=0?"+":""}${r.late_min}m</td>
+    <td>${hh(r.turnaround_min)}</td><td>${r.pallets}</td></tr>`).join("");
+}
+function fillLegend(){
+  document.getElementById("legend").innerHTML=
+    Object.entries(ROLE_COLOR).map(([r,v])=>`<span><i style="background:${cssSafe(v)}"></i>${ROLE_LABEL[r]}</span>`).join("");
+}
+
+/* ---------- boot ---------- */
+resize();
+loadRuns();
+loadRun("default");
+requestAnimationFrame(t=>{last=t;requestAnimationFrame(frameLoop);});
+</script>
+</body>
+</html>

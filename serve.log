@@ -1,0 +1,4 @@
+  File "/home/ilham/wms-sim/serve.py", line 3
+    * serve.py — stdlib-only server for the wms-sim viewer.
+               ^
+SyntaxError: invalid character '—' (U+2014)
